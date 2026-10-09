@@ -10,5 +10,5 @@ webtyp.com/json v0.5.29 h1:6+xcKm8Vz6Idrj51/5qadJRMbH0gldUe/DnuueAzIbE=
 webtyp.com/json v0.5.29/go.mod h1:SrPAF5eadQeUVdnBX4wfi4gvztvaTBAO1y8AuHedOSw=
 webtyp.com/model v0.2.2 h1:9+yUcKgnbZombAmnXsKXdCWXWNq5ZgdKDFJj0V102g8=
 webtyp.com/model v0.2.2/go.mod h1:OkyYeE3GOG8eAQGhd9wVsORAhr+xYj3q8avpoGXG25c=
-webtyp.com/router v0.3.2 h1:4Sxvwg7x+4+sHs2PGo8C48CkS5lufIh/W43CzYLrqg0=
-webtyp.com/router v0.3.2/go.mod h1:C7IDoFEuwq8kTMeM+qzCPP9dY0Yd2PP8xU4zNiN0FAI=
+webtyp.com/router v0.4.1 h1:0u5bsW2pTivOShZf+h2Jabl/IhQq8F/Je9Xci5A/LNs=
+webtyp.com/router v0.4.1/go.mod h1:UtaMNSYe1kmDmrx0bGG0sOj59AxNXy6EOesRMXWWE20=
