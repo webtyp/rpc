@@ -204,3 +204,10 @@ view, _ := patientsui.Browser(caller, ids, tenantID)
 - `gotest ./...` green (stdlib and wasm lanes).
 - `grep -rn "map\[" --include=*.go . | grep -v _test.go` → empty.
 - `grep -rn "TODO\|FIXME" --include=*.go .` → empty.
+
+## Executor notes
+- Added HTTP binding in `mount.go` to route domain module operations.
+- Handled CSRF safely by requiring strictly `application/json` Content-Type on all operation requests.
+- Prevented using map collections to support TinyGo compilation targets.
+- Added corresponding Caller in `caller.go` for the HTTP transport via `webtyp.com/fetch`.
+- Authored 8 test cases validating both success and error paths as listed in section 4.
