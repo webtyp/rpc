@@ -7,21 +7,50 @@ import (
 	"webtyp.com/router"
 )
 
-type clr struct {
+// Caller sends operations over HTTP. It implements router.Caller.
+type Caller struct {
 	origin string
 }
 
-// NewCaller returns a router.Caller that sends each Call as POST <origin><prefix>/<module>/<op>
-// with a JSON body. origin "" means the page's own origin (relative URLs). Uses DefaultPrefix.
-func NewCaller(origin string) router.Caller {
-	return &clr{origin: origin}
+// NewCaller returns a Caller for origin ("" = the page's own origin). Uses DefaultPrefix.
+func NewCaller(origin string) *Caller {
+	return &Caller{origin: origin}
 }
 
-func (c *clr) Dispatch(op string, args model.Encodable) {
+func (c *Caller) Dispatch(op string, args model.Encodable) {
 	c.Call(op, args, nil, nil)
 }
 
-func (c *clr) Call(op string, args model.Encodable, into model.Decodable, done func(err error)) {
+func (c *Caller) Call(op string, args model.Encodable, into model.Decodable, done func(err error)) {
+	var body []byte
+	if args == nil || args.IsNil() {
+		body = []byte("{}")
+	} else if err := json.Encode(args, &body); err != nil {
+		if done != nil {
+			done(&Error{Status: 0, Body: err.Error()})
+		}
+		return
+	}
+	c.send(op, "", body, into, done)
+}
+
+// CallKeyed is Call with the request header router.HeaderIdempotencyKey set to key, so a server
+// running the idempotency middleware answers a repeated send once. key == "" → done receives an
+// *Error with Status 0 and Body "rpc: idempotency key is required" and nothing is sent.
+func (c *Caller) CallKeyed(op, key string, body []byte, into model.Decodable, done func(err error)) {
+	if key == "" {
+		if done != nil {
+			done(&Error{Status: 0, Body: "rpc: idempotency key is required"})
+		}
+		return
+	}
+	if len(body) == 0 {
+		body = []byte("{}")
+	}
+	c.send(op, key, body, into, done)
+}
+
+func (c *Caller) send(op, key string, body []byte, into model.Decodable, done func(err error)) {
 	dotIdx := -1
 	for i := 0; i < len(op); i++ {
 		if op[i] == '.' {
@@ -43,17 +72,11 @@ func (c *clr) Call(op string, args model.Encodable, into model.Decodable, done f
 	opName := op[dotIdx+1:]
 	url := c.origin + DefaultPrefix + slash + module + slash + opName
 
-	var body []byte
-	if args == nil || args.IsNil() {
-		body = []byte("{}")
-	} else if err := json.Encode(args, &body); err != nil {
-		if done != nil {
-			done(&Error{Status: 0, Body: err.Error()})
-		}
-		return
+	req := fetch.Post(url).ContentTypeJSON()
+	if key != "" {
+		req.Header(router.HeaderIdempotencyKey, key)
 	}
-
-	fetch.Post(url).ContentTypeJSON().Body(body).Send(func(resp *fetch.Response, err error) {
+	req.Body(body).Send(func(resp *fetch.Response, err error) {
 		if done == nil {
 			return
 		}
@@ -74,3 +97,5 @@ func (c *clr) Call(op string, args model.Encodable, into model.Decodable, done f
 		done(nil)
 	})
 }
+
+var _ router.Caller = (*Caller)(nil)
