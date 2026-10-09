@@ -1,4 +1,5 @@
 # rpc: domain operations over plain HTTP
+<img src="docs/img/badges.svg">
 
 This package provides an HTTP binding for `router.OperationModule`.
 

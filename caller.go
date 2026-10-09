@@ -46,8 +46,11 @@ func (c *clr) Call(op string, args model.Encodable, into model.Decodable, done f
 	var body []byte
 	if args == nil || args.IsNil() {
 		body = []byte("{}")
-	} else {
-		json.Encode(args, &body)
+	} else if err := json.Encode(args, &body); err != nil {
+		if done != nil {
+			done(&Error{Status: 0, Body: err.Error()})
+		}
+		return
 	}
 
 	fetch.Post(url).ContentTypeJSON().Body(body).Send(func(resp *fetch.Response, err error) {

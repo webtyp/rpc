@@ -2,18 +2,20 @@ package rpc
 
 import (
 	"webtyp.com/fmt"
-	"webtyp.com/router"
 	"webtyp.com/model"
+	"webtyp.com/router"
 )
 
 // DefaultPrefix is where operations are mounted: POST /api/<module>/<op>.
 const DefaultPrefix = "/api"
 
 const (
-	slash           = "/"
-	dot             = "."
-	contentTypeJSON = "application/json"
-	contentTypeName = "Content-Type"
+	slash                      = "/"
+	dot                        = "."
+	contentTypeJSON            = "application/json"
+	contentTypeName            = "Content-Type"
+	statusUnsupportedMediaType = 415
+	msgNeedJSON                = "rpc: Content-Type must be application/json"
 )
 
 const (
@@ -60,8 +62,8 @@ func guard(h router.HandlerFunc) router.HandlerFunc {
 	return func(c router.Context) {
 		ct := c.GetHeader(contentTypeName)
 		if len(ct) < len(contentTypeJSON) || ct[:len(contentTypeJSON)] != contentTypeJSON {
-			c.WriteStatus(415)
-			c.Write([]byte("rpc: Content-Type must be application/json"))
+			c.WriteStatus(statusUnsupportedMediaType)
+			c.Write([]byte(msgNeedJSON))
 			return
 		}
 		h(c)
