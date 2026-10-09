@@ -39,6 +39,10 @@ func (m mockModule) MountOperations(reg router.OperationRegistry) {
 			c.WriteStatus(400)
 			return
 		}
+		// If idempotency key is provided, prepend it to the message to verify it was received
+		if key := c.GetHeader(router.HeaderIdempotencyKey); key != "" {
+			args.Msg = key + ":" + args.Msg
+		}
 		c.Encode(&args)
 	}).Public().Accepts((*mockArgs)(nil)).Describe("Echoes the args")
 
@@ -87,6 +91,66 @@ func TestRPCEcho(t *testing.T) {
 
 	if out.Msg != "hello world" {
 		t.Fatalf("expected 'hello world', got '%s'", out.Msg)
+	}
+}
+
+func TestRPCCallKeyed(t *testing.T) {
+	ts, _ := setupTestServer(t)
+	defer ts.Close()
+
+	caller := rpc.NewCaller(ts.URL)
+	body := []byte(`{"msg":"hello world"}`)
+	var out mockArgs
+
+	doneCh := make(chan error, 1)
+	caller.CallKeyed("testmod.echo", "k1", body, &out, func(err error) {
+		doneCh <- err
+	})
+
+	select {
+	case err := <-doneCh:
+		if err != nil {
+			t.Fatalf("CallKeyed failed: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout")
+	}
+
+	if out.Msg != "k1:hello world" {
+		t.Fatalf("expected 'k1:hello world', got '%s'", out.Msg)
+	}
+}
+
+func TestRPCCallKeyedEmptyKey(t *testing.T) {
+	ts, _ := setupTestServer(t)
+	defer ts.Close()
+
+	caller := rpc.NewCaller(ts.URL)
+	body := []byte(`{"msg":"hello world"}`)
+	var out mockArgs
+
+	doneCh := make(chan error, 1)
+	caller.CallKeyed("testmod.echo", "", body, &out, func(err error) {
+		doneCh <- err
+	})
+
+	select {
+	case err := <-doneCh:
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		e, ok := err.(*rpc.Error)
+		if !ok {
+			t.Fatalf("expected *rpc.Error, got %T", err)
+		}
+		if e.Status != 0 {
+			t.Fatalf("expected status 0, got %d", e.Status)
+		}
+		if e.Body != "rpc: idempotency key is required" {
+			t.Fatalf("expected idempotency key required error, got '%s'", e.Body)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout")
 	}
 }
 

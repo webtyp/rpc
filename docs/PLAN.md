@@ -3,8 +3,9 @@ PLAN: "feat!: NewCaller returns *rpc.Caller with CallKeyed — send an operation
 TAG: v0.2.0
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 11570812058643988654
+PR: https://github.com/webtyp/rpc/pull/2
 ---
 
 > This plan is dispatched via the CodeJob workflow. See skill: agents-workflow.
@@ -70,7 +71,7 @@ func (c *Caller) Dispatch(op string, args model.Encodable)
 // CallKeyed is Call with the request header router.HeaderIdempotencyKey set to key, so a server
 // running the idempotency middleware answers a repeated send once. key == "" → done receives an
 // *Error with Status 0 and Body "rpc: idempotency key is required" and nothing is sent.
-func (c *Caller) CallKeyed(op, key string, args model.Encodable, into model.Decodable, done func(err error))
+func (c *Caller) CallKeyed(op, key string, body []byte, into model.Decodable, done func(err error))
 
 var _ router.Caller = (*Caller)(nil)
 ```
@@ -90,9 +91,9 @@ unchanged.
 
 ## 3. Tests (existing nested `tests/` module, real `httpd` server as today)
 
-1. `CallKeyed("testmod.echo", "k1", args, &out, done)` → the handler sees header
+1. `CallKeyed("testmod.echo", "k1", body, &out, done)` → the handler sees header
    `Idempotency-Key: k1` (read it in the test handler with `ctx.GetHeader(router.HeaderIdempotencyKey)`)
-   and `out` equals `args`.
+   and `out` equals the decoded body.
 2. `Call` sends **no** `Idempotency-Key` header.
 3. `CallKeyed` with an empty key → `*rpc.Error{Status: 0}` with the message, and the handler did not run.
 4. All existing tests stay green unchanged (`NewCaller` still usable as `router.Caller`).

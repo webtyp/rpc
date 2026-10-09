@@ -30,3 +30,13 @@ if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, booking, patients, records)
 caller := rpc.NewCaller("")
 view, _ := patientsui.Browser(caller, ids, tenantID)
 ```
+
+## Retrying safely (Idempotency)
+
+If you need to retry an operation safely, use `CallKeyed`. It works like `Call`, but allows you to set an explicit `Idempotency-Key` header (using `router.HeaderIdempotencyKey` as the header name).
+
+```go
+caller.CallKeyed("booking.overbook", "unique-request-id-123", body, &resp, done)
+```
+
+Note: To actually benefit from this, your server must be running the `webtyp.com/idempotency` middleware, which uses this header to ensure a repeated send is only executed once.
