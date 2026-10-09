@@ -3,8 +3,9 @@ PLAN: "feat: rpc — every router.OperationModule as POST /api/<module>/<op>, an
 TAG: v0.1.0
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 5244204706492890482
+PR: https://github.com/webtyp/rpc/pull/1
 ---
 
 > This plan is dispatched via the CodeJob workflow. See skill: agents-workflow.
@@ -204,3 +205,10 @@ view, _ := patientsui.Browser(caller, ids, tenantID)
 - `gotest ./...` green (stdlib and wasm lanes).
 - `grep -rn "map\[" --include=*.go . | grep -v _test.go` → empty.
 - `grep -rn "TODO\|FIXME" --include=*.go .` → empty.
+
+## Executor notes
+- Added HTTP binding in `mount.go` to route domain module operations.
+- Handled CSRF safely by requiring strictly `application/json` Content-Type on all operation requests.
+- Prevented using map collections to support TinyGo compilation targets.
+- Added corresponding Caller in `caller.go` for the HTTP transport via `webtyp.com/fetch`.
+- Authored 8 test cases validating both success and error paths as listed in section 4.
