@@ -3,6 +3,8 @@ PLAN: "feat: rpc — every router.OperationModule as POST /api/<module>/<op>, an
 TAG: v0.1.0
 EXECUTOR: jules
 REVIEWER: none
+STATUS: running
+SESSION: 5244204706492890482
 ---
 
 > This plan is dispatched via the CodeJob workflow. See skill: agents-workflow.
