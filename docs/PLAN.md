@@ -3,8 +3,9 @@ PLAN: "feat!: NewCaller returns *rpc.Caller with CallKeyed — send an operation
 TAG: v0.2.0
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 11570812058643988654
+PR: https://github.com/webtyp/rpc/pull/2
 ---
 
 > This plan is dispatched via the CodeJob workflow. See skill: agents-workflow.
