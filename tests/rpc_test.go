@@ -3,6 +3,7 @@ package rpc_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,11 +26,18 @@ func (m *mockArgs) DecodeFields(d model.FieldReader) {
 		m.Msg = val
 	}
 }
-func (m *mockArgs) IsNil() bool { return m == nil }
+func (m *mockArgs) IsNil() bool           { return m == nil }
 func (m *mockArgs) Schema() []model.Field { return nil }
 func (m *mockArgs) Pointers() []any       { return nil }
 
 type mockModule struct{}
+
+// keyHits counts runs of testmod.key, to prove a refused CallKeyed never reaches the server;
+// lastKey holds the Idempotency-Key header of its last run.
+var (
+	keyHits atomic.Int32
+	lastKey atomic.Value
+)
 
 func (m mockModule) ModelName() string { return "testmod" }
 func (m mockModule) MountOperations(reg router.OperationRegistry) {
@@ -45,6 +53,12 @@ func (m mockModule) MountOperations(reg router.OperationRegistry) {
 		}
 		c.Encode(&args)
 	}).Public().Accepts((*mockArgs)(nil)).Describe("Echoes the args")
+
+	reg.Operation("key", func(c router.Context) {
+		keyHits.Add(1)
+		lastKey.Store(c.GetHeader(router.HeaderIdempotencyKey))
+		c.WriteStatus(204)
+	}).Public().Describe("Records the Idempotency-Key header it received")
 
 	reg.Operation("secret", func(c router.Context) {
 		c.Write([]byte("secret stuff"))
@@ -126,11 +140,10 @@ func TestRPCCallKeyedEmptyKey(t *testing.T) {
 	defer ts.Close()
 
 	caller := rpc.NewCaller(ts.URL)
-	body := []byte(`{"msg":"hello world"}`)
-	var out mockArgs
+	before := keyHits.Load()
 
 	doneCh := make(chan error, 1)
-	caller.CallKeyed("testmod.echo", "", body, &out, func(err error) {
+	caller.CallKeyed("testmod.key", "", []byte(`{}`), nil, func(err error) {
 		doneCh <- err
 	})
 
@@ -151,6 +164,48 @@ func TestRPCCallKeyedEmptyKey(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout")
+	}
+
+	if hits := keyHits.Load() - before; hits != 0 {
+		t.Fatalf("handler ran %d times; an empty key must send nothing", hits)
+	}
+}
+
+// sentKey calls testmod.key and returns the Idempotency-Key header the server received.
+func sentKey(t *testing.T, call func(c *rpc.Caller, done func(error))) string {
+	t.Helper()
+	ts, _ := setupTestServer(t)
+	defer ts.Close()
+
+	lastKey.Store("<none>")
+	doneCh := make(chan error, 1)
+	call(rpc.NewCaller(ts.URL), func(err error) { doneCh <- err })
+	select {
+	case err := <-doneCh:
+		if err != nil {
+			t.Fatalf("call failed: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout")
+	}
+	return lastKey.Load().(string)
+}
+
+func TestRPCCallKeyedSendsHeader(t *testing.T) {
+	got := sentKey(t, func(c *rpc.Caller, done func(error)) {
+		c.CallKeyed("testmod.key", "k1", nil, nil, done)
+	})
+	if got != "k1" {
+		t.Fatalf("server received Idempotency-Key %q, want %q", got, "k1")
+	}
+}
+
+func TestRPCCallSendsNoKey(t *testing.T) {
+	got := sentKey(t, func(c *rpc.Caller, done func(error)) {
+		c.Call("testmod.key", nil, nil, done)
+	})
+	if got != "" {
+		t.Fatalf("Call sent Idempotency-Key %q; it must send none", got)
 	}
 }
 
@@ -314,10 +369,12 @@ func TestRPCMountErrors(t *testing.T) {
 }
 
 type emptyModule struct{}
-func (emptyModule) ModelName() string { return "" }
+
+func (emptyModule) ModelName() string                            { return "" }
 func (emptyModule) MountOperations(reg router.OperationRegistry) {}
 
 type dupModule struct{}
+
 func (dupModule) ModelName() string { return "testmod" }
 func (dupModule) MountOperations(reg router.OperationRegistry) {
 	reg.Operation("echo", func(c router.Context) {})

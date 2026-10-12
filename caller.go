@@ -7,6 +7,11 @@ import (
 	"webtyp.com/router"
 )
 
+const (
+	msgKeyRequired = "rpc: idempotency key is required"
+	msgBadOpName   = "rpc: operation name must be <module>.<op>"
+)
+
 // Caller sends operations over HTTP. It implements router.Caller.
 type Caller struct {
 	origin string
@@ -17,10 +22,13 @@ func NewCaller(origin string) *Caller {
 	return &Caller{origin: origin}
 }
 
+// Dispatch is Call without a result: fire and forget.
 func (c *Caller) Dispatch(op string, args model.Encodable) {
 	c.Call(op, args, nil, nil)
 }
 
+// Call sends args as JSON to POST <origin>/api/<module>/<op> and decodes a 2xx answer into into.
+// Any other outcome reaches done as an *Error.
 func (c *Caller) Call(op string, args model.Encodable, into model.Decodable, done func(err error)) {
 	var body []byte
 	if args == nil || args.IsNil() {
@@ -37,10 +45,11 @@ func (c *Caller) Call(op string, args model.Encodable, into model.Decodable, don
 // CallKeyed is Call with the request header router.HeaderIdempotencyKey set to key, so a server
 // running the idempotency middleware answers a repeated send once. key == "" → done receives an
 // *Error with Status 0 and Body "rpc: idempotency key is required" and nothing is sent.
+// body is the operation's args already encoded as JSON (as a queue stores them); empty sends "{}".
 func (c *Caller) CallKeyed(op, key string, body []byte, into model.Decodable, done func(err error)) {
 	if key == "" {
 		if done != nil {
-			done(&Error{Status: 0, Body: "rpc: idempotency key is required"})
+			done(&Error{Status: 0, Body: msgKeyRequired})
 		}
 		return
 	}
@@ -63,7 +72,7 @@ func (c *Caller) send(op, key string, body []byte, into model.Decodable, done fu
 	}
 	if dotIdx == -1 {
 		if done != nil {
-			done(&Error{Status: 0, Body: "rpc: operation name must be <module>.<op>"})
+			done(&Error{Status: 0, Body: msgBadOpName})
 		}
 		return
 	}

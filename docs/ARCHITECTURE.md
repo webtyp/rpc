@@ -33,10 +33,13 @@ view, _ := patientsui.Browser(caller, ids, tenantID)
 
 ## Retrying safely (Idempotency)
 
-If you need to retry an operation safely, use `CallKeyed`. It works like `Call`, but allows you to set an explicit `Idempotency-Key` header (using `router.HeaderIdempotencyKey` as the header name).
+To resend an operation without running it twice, call `CallKeyed` with a key that identifies that
+one mutation (for example the id an outbox gave it) and the args **already encoded as JSON**:
 
 ```go
-caller.CallKeyed("booking.overbook", "unique-request-id-123", body, &resp, done)
+caller.CallKeyed("booking.create_reservation", mutationID, encodedArgs, &out, done)
 ```
 
-Note: To actually benefit from this, your server must be running the `webtyp.com/idempotency` middleware, which uses this header to ensure a repeated send is only executed once.
+It sends the header `router.HeaderIdempotencyKey` (`Idempotency-Key`). The server must run the
+`webtyp.com/idempotency` middleware for a repeated send to be answered once. An empty key is refused
+before anything is sent (`*rpc.Error` with `Status` 0); an empty body is sent as `{}`.
