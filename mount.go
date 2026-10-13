@@ -38,6 +38,7 @@ type dummyRoute struct{}
 func (d dummyRoute) Requires(resource model.Resource, action model.Action) router.Route { return d }
 func (d dummyRoute) Authenticated() router.Route                                        { return d }
 func (d dummyRoute) Public() router.Route                                               { return d }
+func (d dummyRoute) RequiresMFA() router.Route                                          { return d }
 func (d dummyRoute) Accepts(schema model.Fielder) router.Route                          { return d }
 func (d dummyRoute) Describe(desc string) router.Route                                  { return d }
 
