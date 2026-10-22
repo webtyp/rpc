@@ -6,7 +6,7 @@ replace webtyp.com/rpc => ../
 
 require (
 	webtyp.com/model v0.2.4
-	webtyp.com/router v0.4.5
+	webtyp.com/router v0.4.6
 	webtyp.com/rpc v0.2.3
 	webtyp.com/server v0.2.86
 )
