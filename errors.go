@@ -12,15 +12,6 @@ const (
 	ctxKeyInternal     = "rpc.internal"
 )
 
-// The statuses an error kind travels as; WriteError writes them and Error.Kind
-// reads them back, so the two directions cannot drift apart.
-const (
-	statusInvalid  = 400
-	statusNotFound = 404
-	statusConflict = 409
-	statusInternal = 500
-)
-
 // Error is what Call reports when the server answers outside 2xx, or when the request never
 // got an answer (Status 0). Callers that must tell "refused" (4xx) from "try later" (0, 5xx)
 // assert it: if e, ok := err.(*rpc.Error); ok { ... }.
@@ -43,57 +34,10 @@ func (e *Error) Error() string {
 
 // Kind lets model.KindOf answer in the browser what it answers on the server: the
 // status the server chose tells the kind (no answer at all is internal).
-func (e *Error) Kind() model.ErrorKind {
-	switch e.Status {
-	case statusInvalid:
-		return model.ErrorInvalid
-	case statusNotFound:
-		return model.ErrorNotFound
-	case statusConflict:
-		return model.ErrorConflict
-	}
-	return model.ErrorInternal
-}
+func (e *Error) Kind() model.ErrorKind { return router.KindOfStatus(e.Status) }
 
 // FailedField lets model.FieldOf name the field the server said failed.
 func (e *Error) FailedField() string { return e.Field }
-
-type problem struct {
-	Status int64
-	Title  string
-	Detail string
-	Field  string
-}
-
-func (p *problem) IsNil() bool {
-	return p == nil
-}
-
-func (p *problem) EncodeFields(w model.FieldWriter) {
-	w.Int("status", p.Status)
-	w.String("title", p.Title)
-	if p.Detail != "" {
-		w.String("detail", p.Detail)
-	}
-	if p.Field != "" {
-		w.String("field", p.Field)
-	}
-}
-
-func (p *problem) DecodeFields(r model.FieldReader) {
-	if val, ok := r.Int("status"); ok {
-		p.Status = val
-	}
-	if val, ok := r.String("title"); ok {
-		p.Title = val
-	}
-	if val, ok := r.String("detail"); ok {
-		p.Detail = val
-	}
-	if val, ok := r.String("field"); ok {
-		p.Field = val
-	}
-}
 
 // WriteError answers an operation's error. The status comes from model.KindOf(err):
 // invalid 400, not found 404, conflict 409, anything unclassified 500. The body is an
@@ -107,30 +51,21 @@ func (p *problem) DecodeFields(r model.FieldReader) {
 //	if err != nil { rpc.WriteError(ctx, err); return }
 func WriteError(ctx router.Context, err error) {
 	kind := model.KindOf(err)
-	var status int64 = statusInternal
+	status := router.StatusOf(kind)
 	detail := err.Error()
-
-	switch kind {
-	case model.ErrorInvalid:
-		status = statusInvalid
-	case model.ErrorNotFound:
-		status = statusNotFound
-	case model.ErrorConflict:
-		status = statusConflict
-	default:
-		status = statusInternal
+	if kind == model.ErrorInternal {
 		detail = msgInternal
 		ctx.SetValue(ctxKeyInternal, err.Error())
 	}
 
-	p := problem{
-		Status: status,
+	p := router.Problem{
+		Status: int64(status),
 		Title:  kind.String(),
 		Detail: detail,
 		Field:  model.FieldOf(err),
 	}
 
 	ctx.SetHeader(contentTypeName, contentTypeProblem)
-	ctx.WriteStatus(int(status))
+	ctx.WriteStatus(status)
 	ctx.Encode(&p)
 }

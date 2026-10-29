@@ -8,7 +8,7 @@ require (
 	webtyp.com/fmt v1.0.0
 	webtyp.com/model v0.2.12
 	webtyp.com/router v0.4.16
-	webtyp.com/rpc v0.2.12
+	webtyp.com/rpc v0.2.13
 	webtyp.com/server v0.2.100
 )
 

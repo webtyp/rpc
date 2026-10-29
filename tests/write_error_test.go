@@ -11,6 +11,7 @@ import (
 	"webtyp.com/fmt"
 	"webtyp.com/model"
 	"webtyp.com/router"
+	"webtyp.com/router/loopback"
 	"webtyp.com/rpc"
 	"webtyp.com/server/httpd"
 )
@@ -220,5 +221,26 @@ func TestCaller_ErrorAnswersKindOfAndFieldOf(t *testing.T) {
 	err = call(caller, "errormod.not_found")
 	if got := model.KindOf(err); got != model.ErrorNotFound {
 		t.Errorf("KindOf(not found) = %v, want %v", got, model.ErrorNotFound)
+	}
+}
+
+// The same operation answers the same kind and field over HTTP and in-process:
+// a screen behaves the same in a demo (loopback) and in the app (rpc).
+func TestErrors_SameOnEveryTransport(t *testing.T) {
+	ts, _ := setupErrorTestServer(t, nil)
+	defer ts.Close()
+	overHTTP := rpc.NewCaller(ts.URL)
+	inProcess := loopback.New(errorTestModule{})
+
+	for _, op := range []string{"errormod.not_found", "errormod.conflict", "errormod.field_error", "errormod.internal"} {
+		viaHTTP := call(overHTTP, op)
+		var viaLoopback error
+		inProcess.Call(op, nil, nil, func(err error) { viaLoopback = err })
+		if model.KindOf(viaHTTP) != model.KindOf(viaLoopback) {
+			t.Errorf("%s: KindOf http=%v loopback=%v", op, model.KindOf(viaHTTP), model.KindOf(viaLoopback))
+		}
+		if model.FieldOf(viaHTTP) != model.FieldOf(viaLoopback) {
+			t.Errorf("%s: FieldOf http=%q loopback=%q", op, model.FieldOf(viaHTTP), model.FieldOf(viaLoopback))
+		}
 	}
 }
