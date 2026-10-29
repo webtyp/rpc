@@ -52,14 +52,15 @@ type activeRegistry struct {
 	r      router.Router
 	prefix string
 	module string
+	log    func(...any)
 }
 
 func (r *activeRegistry) Operation(name string, h router.HandlerFunc) router.Route {
 	path := r.prefix + slash + r.module + slash + name
-	return r.r.Post(path, guard(h))
+	return r.r.Post(path, guard(h, path, r.log))
 }
 
-func guard(h router.HandlerFunc) router.HandlerFunc {
+func guard(h router.HandlerFunc, path string, log func(...any)) router.HandlerFunc {
 	return func(c router.Context) {
 		ct := c.GetHeader(contentTypeName)
 		if len(ct) < len(contentTypeJSON) || ct[:len(contentTypeJSON)] != contentTypeJSON {
@@ -68,6 +69,9 @@ func guard(h router.HandlerFunc) router.HandlerFunc {
 			return
 		}
 		h(c)
+		if d := c.Value(ctxKeyInternal); d != "" && log != nil {
+			log("rpc:", path, "internal error:", d)
+		}
 	}
 }
 
@@ -75,7 +79,8 @@ func guard(h router.HandlerFunc) router.HandlerFunc {
 // the access, arguments and description the module declared on the returned Route.
 // It returns an error, and mounts nothing, when a module has an empty ModelName(), when prefix
 // does not start with "/" or ends with "/", or when two operations resolve to the same path.
-func Mount(r router.Router, prefix string, modules ...router.OperationModule) error {
+// log is an optional logger called when an operation returns a 500 internal error.
+func Mount(r router.Router, prefix string, log func(...any), modules ...router.OperationModule) error {
 	if len(prefix) == 0 || prefix[0] != '/' || prefix[len(prefix)-1] == '/' {
 		return errBadPrefix
 	}
@@ -104,6 +109,7 @@ func Mount(r router.Router, prefix string, modules ...router.OperationModule) er
 	act := &activeRegistry{
 		r:      r,
 		prefix: prefix,
+		log:    log,
 	}
 	for _, m := range modules {
 		act.module = m.ModelName()

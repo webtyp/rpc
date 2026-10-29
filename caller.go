@@ -94,7 +94,15 @@ func (c *Caller) send(op, key string, body []byte, into model.Decodable, done fu
 			return
 		}
 		if resp.Status < 200 || resp.Status > 299 {
-			done(&Error{Status: resp.Status, Body: resp.Text()})
+			errResp := &Error{Status: resp.Status, Body: resp.Text()}
+			if len(errResp.Body) > 0 && errResp.Body[0] == '{' {
+				var p problem
+				if decodeErr := json.Decode(errResp.Body, &p); decodeErr == nil {
+					errResp.Detail = p.Detail
+					errResp.Field = p.Field
+				}
+			}
+			done(errResp)
 			return
 		}
 		if into != nil {
