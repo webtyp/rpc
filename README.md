@@ -32,6 +32,34 @@ caller := rpc.NewCaller("")
 view, _ := patientsui.Browser(caller, ids, tenantID)
 ```
 
+## Errors
+
+`rpc.WriteError` maps an error to an RFC 9457 `application/problem+json` response:
+
+| Error kind | HTTP Status |
+|---|---|
+| `model.ErrorInvalid` | 400 |
+| `model.ErrorNotFound` | 404 |
+| `model.ErrorConflict` | 409 |
+| (unclassified) | 500 |
+
+The response body has this shape:
+```json
+{"status":400,"title":"invalid","detail":"name required","field":"name"}
+```
+
+Use it as a one-liner in handlers:
+```go
+if err != nil {
+    rpc.WriteError(ctx, err)
+    return
+}
+```
+
+For 500s, the detail sent to the client is always "internal error". The real error message is passed to the logger provided to `Mount(r, prefix, log, modules...)`.
+
+On the client side, `rpc.Error` has `Detail` and `Field` fields populated when the server sends a problem detail.
+
 ## Retrying safely (Idempotency)
 
 To resend an operation without running it twice, call `CallKeyed` with a key that identifies that

@@ -73,7 +73,7 @@ func (m mockModule) MountOperations(reg router.OperationRegistry) {
 func setupTestServer(t *testing.T) (*httptest.Server, router.Router) {
 	mux := http.NewServeMux()
 	r := httpd.NewRouter(mux)
-	if err := rpc.Mount(r, rpc.DefaultPrefix, mockModule{}); err != nil {
+	if err := rpc.Mount(r, rpc.DefaultPrefix, nil, mockModule{}); err != nil {
 		t.Fatalf("Mount failed: %v", err)
 	}
 
@@ -347,22 +347,22 @@ func TestRPCUnreachable(t *testing.T) {
 func TestRPCMountErrors(t *testing.T) {
 	r := httpd.NewRouter(http.NewServeMux())
 
-	err := rpc.Mount(r, "api", mockModule{})
+	err := rpc.Mount(r, "api", nil, mockModule{})
 	if err == nil {
 		t.Fatal("expected error for bad prefix 'api'")
 	}
 
-	err = rpc.Mount(r, "/api/", mockModule{})
+	err = rpc.Mount(r, "/api/", nil, mockModule{})
 	if err == nil {
 		t.Fatal("expected error for bad prefix '/api/'")
 	}
 
-	err = rpc.Mount(r, rpc.DefaultPrefix, emptyModule{})
+	err = rpc.Mount(r, rpc.DefaultPrefix, nil, emptyModule{})
 	if err == nil {
 		t.Fatal("expected error for empty ModelName")
 	}
 
-	err = rpc.Mount(r, rpc.DefaultPrefix, mockModule{}, mockModule{})
+	err = rpc.Mount(r, rpc.DefaultPrefix, nil, mockModule{}, mockModule{})
 	if err == nil {
 		t.Fatal("expected error for duplicate op path")
 	}

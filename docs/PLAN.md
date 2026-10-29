@@ -2,8 +2,10 @@
 PLAN: "feat: WriteError — one answer for every operation's error: status from model.KindOf, the failed field, a generic 500 with the detail in the log"
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 322685870644420113
+PR: https://github.com/webtyp/rpc/pull/3
+REVIEWED_COMMIT: 41858a043a33e396b24139fc8ae39c511ee1cb9a
 ---
 
 > Read AGENTS.md at the repo root before any change.

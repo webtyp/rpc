@@ -11,6 +11,12 @@ Each operation becomes its own route, with the permission, arguments, and descri
 - **tRPC**: `/trpc/<router>.<procedure>`; a typed client generated from the server's procedures. Same idea as our `Caller`, without code generation because the args are already typed models.
 - **REST (Rails resources, JAX-RS)**: rejected. Our operations are named commands (`change_reservation_status`, `overbook`), and mapping them onto CRUD verbs loses meaning and duplicates decisions the module already made.
 
+## Errors
+
+Every domain module used to answer its errors with its own `errors.go`, which caused drift (some returning empty bodies, others leaking SQL text). To unify this, `rpc.WriteError` acts as the single piece that answers every operation's error, based on `model.KindOf`.
+
+This implementation follows RFC 9457 (Problem Details for HTTP APIs). For unclassified errors (mapped to 500), it explicitly hides the internal error details from the browser to avoid exposing implementation internals (such as SQL statements), passing the real error message to the server log instead.
+
 ## Security Rule: 415/CSRF
 
 The `Content-Type` header of all requests must exactly be `application/json`.
