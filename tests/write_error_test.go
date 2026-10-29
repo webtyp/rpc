@@ -200,3 +200,25 @@ func TestCaller_PlainBodyStillWorks(t *testing.T) {
 		t.Errorf("expected Error() 'rpc: 400 bad', got %q", e.Error())
 	}
 }
+
+// The browser asks the same two questions the server does: model.KindOf and
+// model.FieldOf answer the rpc client's error, so a screen never needs to know
+// the transport.
+func TestCaller_ErrorAnswersKindOfAndFieldOf(t *testing.T) {
+	ts, _ := setupErrorTestServer(t, nil)
+	defer ts.Close()
+	caller := rpc.NewCaller(ts.URL)
+
+	err := call(caller, "errormod.field_error")
+	if got := model.KindOf(err); got != model.ErrorInvalid {
+		t.Errorf("KindOf(field error) = %v, want %v", got, model.ErrorInvalid)
+	}
+	if got := model.FieldOf(err); got != "name" {
+		t.Errorf("FieldOf(field error) = %q, want %q", got, "name")
+	}
+
+	err = call(caller, "errormod.not_found")
+	if got := model.KindOf(err); got != model.ErrorNotFound {
+		t.Errorf("KindOf(not found) = %v, want %v", got, model.ErrorNotFound)
+	}
+}

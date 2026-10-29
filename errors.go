@@ -12,6 +12,15 @@ const (
 	ctxKeyInternal     = "rpc.internal"
 )
 
+// The statuses an error kind travels as; WriteError writes them and Error.Kind
+// reads them back, so the two directions cannot drift apart.
+const (
+	statusInvalid  = 400
+	statusNotFound = 404
+	statusConflict = 409
+	statusInternal = 500
+)
+
 // Error is what Call reports when the server answers outside 2xx, or when the request never
 // got an answer (Status 0). Callers that must tell "refused" (4xx) from "try later" (0, 5xx)
 // assert it: if e, ok := err.(*rpc.Error); ok { ... }.
@@ -32,11 +41,22 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("rpc: %d %s", e.Status, e.Body)
 }
 
-type rpcError string
-
-func (e rpcError) Error() string {
-	return string(e)
+// Kind lets model.KindOf answer in the browser what it answers on the server: the
+// status the server chose tells the kind (no answer at all is internal).
+func (e *Error) Kind() model.ErrorKind {
+	switch e.Status {
+	case statusInvalid:
+		return model.ErrorInvalid
+	case statusNotFound:
+		return model.ErrorNotFound
+	case statusConflict:
+		return model.ErrorConflict
+	}
+	return model.ErrorInternal
 }
+
+// FailedField lets model.FieldOf name the field the server said failed.
+func (e *Error) FailedField() string { return e.Field }
 
 type problem struct {
 	Status int64
@@ -87,18 +107,18 @@ func (p *problem) DecodeFields(r model.FieldReader) {
 //	if err != nil { rpc.WriteError(ctx, err); return }
 func WriteError(ctx router.Context, err error) {
 	kind := model.KindOf(err)
-	var status int64 = 500
+	var status int64 = statusInternal
 	detail := err.Error()
 
 	switch kind {
 	case model.ErrorInvalid:
-		status = 400
+		status = statusInvalid
 	case model.ErrorNotFound:
-		status = 404
+		status = statusNotFound
 	case model.ErrorConflict:
-		status = 409
+		status = statusConflict
 	default:
-		status = 500
+		status = statusInternal
 		detail = msgInternal
 		ctx.SetValue(ctxKeyInternal, err.Error())
 	}

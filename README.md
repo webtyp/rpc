@@ -34,6 +34,8 @@ view, _ := patientsui.Browser(caller, ids, tenantID)
 
 ## Errors
 
+The browser asks the same questions as the server: `model.KindOf(err)` and `model.FieldOf(err)` answer the `*rpc.Error` that `Call` returns (its status gives the kind; a network failure is internal), so a screen never needs to know which transport answered.
+
 `rpc.WriteError` maps an error to an RFC 9457 `application/problem+json` response:
 
 | Error kind | HTTP Status |

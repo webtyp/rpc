@@ -18,13 +18,13 @@ const (
 	msgNeedJSON                = "rpc: Content-Type must be application/json"
 )
 
-const (
-	errEmptyModelName = rpcError("rpc: module with empty ModelName()")
-	errBadPrefix      = rpcError("rpc: prefix must start with \"/\" and not end with \"/\"")
+var (
+	errEmptyModelName error = fmt.Err("rpc: module with empty ModelName()")
+	errBadPrefix      error = fmt.Err("rpc: prefix must start with \"/\" and not end with \"/\"")
 )
 
 func errDuplicatePath(path string) error {
-	return rpcError(fmt.Sprintf("rpc: duplicate operation path %s", path))
+	return fmt.Err("rpc: duplicate operation path", path)
 }
 
 type collectingRegistry struct {
