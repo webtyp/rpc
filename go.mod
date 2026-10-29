@@ -5,8 +5,8 @@ go 1.26.8
 require (
 	webtyp.com/fetch v0.1.29
 	webtyp.com/fmt v1.0.0
-	webtyp.com/json v0.5.29
-	webtyp.com/model v0.2.6
+	webtyp.com/json v0.5.37
+	webtyp.com/model v0.2.9
 	webtyp.com/router v0.4.9
 )
 
