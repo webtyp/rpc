@@ -2,6 +2,8 @@
 PLAN: "feat: WriteError — one answer for every operation's error: status from model.KindOf, the failed field, a generic 500 with the detail in the log"
 EXECUTOR: jules
 REVIEWER: none
+STATUS: running
+SESSION: 322685870644420113
 ---
 
 > Read AGENTS.md at the repo root before any change.
