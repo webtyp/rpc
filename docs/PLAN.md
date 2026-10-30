@@ -2,6 +2,8 @@
 PLAN: "feat: rpc.Routes — the routes of every operation, with its access, without a server"
 EXECUTOR: jules
 REVIEWER: none
+STATUS: running
+SESSION: 13550848540781111546
 ---
 
 > Read AGENTS.md at the repo root before any change.
