@@ -27,25 +27,78 @@ func errDuplicatePath(path string) error {
 	return fmt.Err("rpc: duplicate operation path", path)
 }
 
+const methodPost = "POST"
+
+// collectingRegistry walks the operations and keeps the route each one gets.
 type collectingRegistry struct {
-	paths  []string
+	routes []router.RouteInfo
 	prefix string
 	module string
 }
 
-type dummyRoute struct{}
-
-func (d dummyRoute) Requires(resource model.Resource, action model.Action) router.Route { return d }
-func (d dummyRoute) Authenticated() router.Route                                        { return d }
-func (d dummyRoute) Public() router.Route                                               { return d }
-func (d dummyRoute) RequiresMFA() router.Route                                          { return d }
-func (d dummyRoute) Accepts(schema model.Fielder) router.Route                          { return d }
-func (d dummyRoute) Describe(desc string) router.Route                                  { return d }
-
 func (r *collectingRegistry) Operation(name string, h router.HandlerFunc) router.Route {
-	path := r.prefix + slash + r.module + slash + name
-	r.paths = append(r.paths, path)
-	return dummyRoute{}
+	r.routes = append(r.routes, router.RouteInfo{Method: methodPost, Path: r.prefix + slash + r.module + slash + name})
+	return collectingRoute{reg: r, i: len(r.routes) - 1}
+}
+
+// collectingRoute records what an operation declares on its route.
+type collectingRoute struct {
+	reg *collectingRegistry
+	i   int
+}
+
+func (c collectingRoute) Requires(resource model.Resource, action model.Action) router.Route {
+	c.reg.routes[c.i].Resource = resource
+	c.reg.routes[c.i].Action = action
+	return c
+}
+func (c collectingRoute) Authenticated() router.Route {
+	c.reg.routes[c.i].Access = model.AccessAuthenticated
+	return c
+}
+func (c collectingRoute) Public() router.Route {
+	c.reg.routes[c.i].Access = model.AccessPublic
+	return c
+}
+func (c collectingRoute) RequiresMFA() router.Route {
+	c.reg.routes[c.i].MFA = true
+	return c
+}
+func (c collectingRoute) Accepts(schema model.Fielder) router.Route {
+	c.reg.routes[c.i].Args = schema
+	return c
+}
+func (c collectingRoute) Describe(desc string) router.Route {
+	c.reg.routes[c.i].Description = desc
+	return c
+}
+
+// Routes returns the route every operation of every module gets under prefix
+// (POST <prefix>/<ModelName>/<op>), with the access, arguments and description
+// it declared — without a server. Mount validates through it.
+//
+// Example: routes, err := rpc.Routes(rpc.DefaultPrefix, accessMod)
+func Routes(prefix string, modules ...router.OperationModule) ([]router.RouteInfo, error) {
+	if len(prefix) == 0 || prefix[0] != '/' || prefix[len(prefix)-1] == '/' {
+		return nil, errBadPrefix
+	}
+	col := &collectingRegistry{prefix: prefix}
+	for _, m := range modules {
+		modName := m.ModelName()
+		if modName == "" {
+			return nil, errEmptyModelName
+		}
+		col.module = modName
+		m.MountOperations(col)
+	}
+	for i := 0; i < len(col.routes); i++ {
+		for j := i + 1; j < len(col.routes); j++ {
+			if col.routes[i].Path == col.routes[j].Path {
+				return nil, errDuplicatePath(col.routes[i].Path)
+			}
+		}
+	}
+	return col.routes, nil
 }
 
 type activeRegistry struct {
@@ -81,29 +134,8 @@ func guard(h router.HandlerFunc, path string, log func(...any)) router.HandlerFu
 // does not start with "/" or ends with "/", or when two operations resolve to the same path.
 // log is an optional logger called when an operation returns a 500 internal error.
 func Mount(r router.Router, prefix string, log func(...any), modules ...router.OperationModule) error {
-	if len(prefix) == 0 || prefix[0] != '/' || prefix[len(prefix)-1] == '/' {
-		return errBadPrefix
-	}
-
-	col := &collectingRegistry{
-		prefix: prefix,
-	}
-
-	for _, m := range modules {
-		modName := m.ModelName()
-		if modName == "" {
-			return errEmptyModelName
-		}
-		col.module = modName
-		m.MountOperations(col)
-	}
-
-	for i := 0; i < len(col.paths); i++ {
-		for j := i + 1; j < len(col.paths); j++ {
-			if col.paths[i] == col.paths[j] {
-				return errDuplicatePath(col.paths[i])
-			}
-		}
+	if _, err := Routes(prefix, modules...); err != nil {
+		return err
 	}
 
 	act := &activeRegistry{

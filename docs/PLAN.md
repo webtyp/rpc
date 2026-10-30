@@ -2,8 +2,10 @@
 PLAN: "feat: rpc.Routes — the routes of every operation, with its access, without a server"
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
+STATUS: review
 SESSION: 13550848540781111546
+PR: https://github.com/webtyp/rpc/pull/4
+REVIEWED_COMMIT: 4781bf8a0619d5b1a99ffd1fa51d2f74b04078e2
 ---
 
 > Read AGENTS.md at the repo root before any change.

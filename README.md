@@ -5,6 +5,8 @@ This package provides an HTTP binding for `router.OperationModule`.
 
 Each operation becomes its own route, with the permission, arguments, and description the module declared, so it is visible in `Router.Routes()`, served by any `router.Router` implementation, and callable from the browser.
 
+`rpc.Routes(prefix, modules...)` lists the routes `Mount` would create, with their access, without a server (used by a module's demo for its API explorer).
+
 ## Prior art
 
 - **Connect RPC** (Buf): `POST /<package>.<Service>/<Method>`, JSON body, status codes mapped from errors, no REST verb mapping. Our shape.
