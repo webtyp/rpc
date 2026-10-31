@@ -9,7 +9,7 @@ require (
 	webtyp.com/model v0.2.12
 	webtyp.com/router v0.4.17
 	webtyp.com/rpc v0.2.15
-	webtyp.com/server v0.2.103
+	webtyp.com/server v0.2.105
 )
 
 require (
