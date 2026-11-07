@@ -1,51 +1,35 @@
 # rpc: domain operations over plain HTTP
 
-This package provides an HTTP binding for `router.OperationModule`.
+This package provides an HTTP transport binding for `crud.Module` operations mounted via `crud.Mount`.
 
-Each operation becomes its own route, with the permission, arguments, and description the module declared, so it is visible in `Router.Routes()`, served by any `router.Router` implementation, and callable from the browser.
+Each operation becomes its own route, with the permission, arguments, and description derived by `crud.Mount`, served by any `router.Router` implementation, and callable from client applications or browsers.
 
 ## Prior art
 
 - **Connect RPC** (Buf): `POST /<package>.<Service>/<Method>`, JSON body, status codes mapped from errors, no REST verb mapping. Our shape.
 - **Twirp** (Twitch): `POST /twirp/<package>.<Service>/<Method>` with JSON; deliberately not REST, one URL per procedure.
 - **tRPC**: `/trpc/<router>.<procedure>`; a typed client generated from the server's procedures. Same idea as our `Caller`, without code generation because the args are already typed models.
-- **REST (Rails resources, JAX-RS)**: rejected. Our operations are named commands (`change_reservation_status`, `overbook`), and mapping them onto CRUD verbs loses meaning and duplicates decisions the module already made.
+- **REST (Rails resources, JAX-RS)**: rejected. Our operations are typed domain operations, and mapping them onto arbitrary HTTP paths loses contract guarantees.
 
 ## Errors
 
-Every domain module used to answer its errors with its own `errors.go`, which caused drift (some returning empty bodies, others leaking SQL text). To unify this, `rpc.WriteError` acts as the single piece that answers every operation's error, based on `model.KindOf`.
-
-This implementation follows RFC 9457 (Problem Details for HTTP APIs). For unclassified errors (mapped to 500), it explicitly hides the internal error details from the browser to avoid exposing implementation internals (such as SQL statements), passing the real error message to the server log instead.
+Error writing is centralized in `router.WriteError`, adhering to RFC 9457 (Problem Details for HTTP APIs). Unclassified errors (500) hide internal error text from clients, logging the real error server-side via `router.InternalError`.
 
 ## Security Rule: 415/CSRF
 
 The `Content-Type` header of all requests must exactly be `application/json`.
-
-If it is not, the request will fail with a `415` HTTP status code and an error body `rpc: Content-Type must be application/json` without calling the handler.
-
-**Why**: the native server also decodes HTML form bodies; a cross-site `<form method=post>` cannot send `application/json` without a CORS preflight, so this closes CSRF for cookie-authenticated operations.
+If it is not, the request fails with 415 Unsupported Media Type without calling the handler.
 
 ## Example
 
 ```go
 // server (composition root)
-if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, booking, patients, records); err != nil {
+if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, logFunc, nil, patients); err != nil {
     return err
 }
-// browser (composition root)
+
+// client
 caller := rpc.NewCaller("")
-view, _ := patientsui.Browser(caller, ids, tenantID)
+var list PatientList
+caller.Call("patient_directory."+crud.Op(&Patient{}, model.Read), &crud.ReadArgs{Limit: 20}, &list, done)
 ```
-
-## Retrying safely (Idempotency)
-
-To resend an operation without running it twice, call `CallKeyed` with a key that identifies that
-one mutation (for example the id an outbox gave it) and the args **already encoded as JSON**:
-
-```go
-caller.CallKeyed("booking.create_reservation", mutationID, encodedArgs, &out, done)
-```
-
-It sends the header `router.HeaderIdempotencyKey` (`Idempotency-Key`). The server must run the
-`webtyp.com/idempotency` middleware for a repeated send to be answered once. An empty key is refused
-before anything is sent (`*rpc.Error` with `Status` 0); an empty body is sent as `{}`.

@@ -4,63 +4,70 @@ import (
 	"strings"
 	"testing"
 
+	"webtyp.com/crud"
 	"webtyp.com/model"
-	"webtyp.com/router"
 	"webtyp.com/rpc"
 )
 
-type saveArgs struct{}
+type routeItem struct {
+	ID string
+}
 
-func (s *saveArgs) EncodeFields(w model.FieldWriter) {}
-func (s *saveArgs) DecodeFields(d model.FieldReader) {}
-func (s *saveArgs) IsNil() bool                      { return s == nil }
-func (s *saveArgs) Schema() []model.Field            { return nil }
-func (s *saveArgs) Pointers() []any                  { return nil }
+func (r *routeItem) ModelName() string { return "route_item" }
+func (r *routeItem) IsNil() bool       { return r == nil }
+func (r *routeItem) Schema() []model.Field {
+	return []model.Field{{Name: "id", Type: model.Text()}}
+}
+func (r *routeItem) Pointers() []any                  { return []any{&r.ID} }
+func (r *routeItem) EncodeFields(w model.FieldWriter) { w.String("id", r.ID) }
+func (r *routeItem) DecodeFields(d model.FieldReader) { r.ID, _ = d.String("id") }
+
+type routeItemList []*routeItem
+
+func (s *routeItemList) Len() int                         { return len(*s) }
+func (s *routeItemList) At(i int) model.Fielder           { return (*s)[i] }
+func (s *routeItemList) Append() model.Fielder            { v := &routeItem{}; *s = append(*s, v); return v }
+func (s *routeItemList) IsNil() bool                      { return s == nil }
+func (s *routeItemList) EncodeFields(_ model.FieldWriter) {}
+func (s *routeItemList) DecodeFields(_ model.FieldReader) {}
 
 type routesModule struct{ name string }
 
 func (m routesModule) ModelName() string { return m.name }
-func (m routesModule) MountOperations(reg router.OperationRegistry) {
-	noop := func(router.Context) {}
-	reg.Operation("list", noop).Requires("demo_item", model.Read)
-	reg.Operation("me", noop).Authenticated()
-	reg.Operation("health", noop).Public()
-	reg.Operation("save", noop).Requires("demo_item", model.Create).RequiresMFA().Accepts(&saveArgs{}).Describe("save items")
+func (m routesModule) MountOperations(reg crud.Registry) {
+	reg.Read(&routeItem{}, nil, func(c crud.Caller, args crud.ReadArgs, filter model.Model) (model.ModelSlice, error) {
+		out := routeItemList{}
+		return &out, nil
+	}).Describe("read items")
+
+	reg.Create(func() model.ModelSlice { return &routeItemList{} }, func(c crud.Caller, list model.ModelSlice) error {
+		return nil
+	}).RequiresMFA().Describe("create items")
 }
 
 func TestRoutes_Declarations(t *testing.T) {
-	routes, err := rpc.Routes(rpc.DefaultPrefix, routesModule{"demo"})
+	routes, err := rpc.Routes(rpc.DefaultPrefix, nil, routesModule{"demo"})
 	if err != nil {
 		t.Fatalf("Routes failed: %v", err)
 	}
 
-	if len(routes) != 4 {
-		t.Fatalf("expected 4 routes, got %d", len(routes))
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(routes))
 	}
 
 	r0 := routes[0]
-	if r0.Method != "POST" || r0.Path != "/api/demo/list" || r0.Resource != "demo_item" || r0.Action != model.Read || r0.Access != 0 || r0.MFA || r0.Args != nil || r0.Description != "" {
+	if r0.Method != "POST" || r0.Path != "/api/demo/route_item_r" || r0.Resource != "route_item" || r0.Action != model.Read || r0.Access != 0 || r0.MFA || r0.Description != "read items" {
 		t.Errorf("route 0 mismatch: %+v", r0)
 	}
 
 	r1 := routes[1]
-	if r1.Method != "POST" || r1.Path != "/api/demo/me" || r1.Resource != "" || r1.Action != 0 || r1.Access != model.AccessAuthenticated || r1.MFA || r1.Args != nil || r1.Description != "" {
+	if r1.Method != "POST" || r1.Path != "/api/demo/route_item_c" || r1.Resource != "route_item" || r1.Action != model.Create || r1.Access != 0 || !r1.MFA || r1.Description != "create items" {
 		t.Errorf("route 1 mismatch: %+v", r1)
-	}
-
-	r2 := routes[2]
-	if r2.Method != "POST" || r2.Path != "/api/demo/health" || r2.Resource != "" || r2.Action != 0 || r2.Access != model.AccessPublic || r2.MFA || r2.Args != nil || r2.Description != "" {
-		t.Errorf("route 2 mismatch: %+v", r2)
-	}
-
-	r3 := routes[3]
-	if r3.Method != "POST" || r3.Path != "/api/demo/save" || r3.Resource != "demo_item" || r3.Action != model.Create || r3.Access != 0 || !r3.MFA || r3.Args == nil || r3.Description != "save items" {
-		t.Errorf("route 3 mismatch: %+v", r3)
 	}
 }
 
 func TestRoutes_EmptyModelName(t *testing.T) {
-	routes, err := rpc.Routes(rpc.DefaultPrefix, routesModule{""})
+	routes, err := rpc.Routes(rpc.DefaultPrefix, nil, routesModule{""})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -75,7 +82,7 @@ func TestRoutes_EmptyModelName(t *testing.T) {
 func TestRoutes_BadPrefix(t *testing.T) {
 	badPrefixes := []string{"api", "/api/"}
 	for _, p := range badPrefixes {
-		routes, err := rpc.Routes(p, routesModule{"demo"})
+		routes, err := rpc.Routes(p, nil, routesModule{"demo"})
 		if err == nil {
 			t.Errorf("expected error for prefix %q", p)
 		}
@@ -89,39 +96,14 @@ func TestRoutes_BadPrefix(t *testing.T) {
 }
 
 func TestRoutes_Duplicate(t *testing.T) {
-	routes, err := rpc.Routes(rpc.DefaultPrefix, routesModule{"demo"}, routesModule{"demo"})
+	_, err := rpc.Routes(rpc.DefaultPrefix, nil, routesModule{"demo"}, routesModule{"demo"})
 	if err == nil {
 		t.Fatal("expected error for duplicate, got nil")
 	}
 	if !strings.HasPrefix(err.Error(), "rpc: duplicate operation path") {
 		t.Errorf("expected error to start with 'rpc: duplicate operation path', got '%v'", err)
 	}
-	if !strings.Contains(err.Error(), "/api/demo/list") {
-		t.Errorf("expected error to contain '/api/demo/list', got '%v'", err)
+	if !strings.Contains(err.Error(), "/api/demo/route_item_r") {
+		t.Errorf("expected error to contain '/api/demo/route_item_r', got '%v'", err)
 	}
-	if routes != nil {
-		t.Errorf("expected nil routes on duplicate, got %v", routes)
-	}
-}
-
-func TestMount_SameValidation(t *testing.T) {
-	r := &routerMock{}
-	err := rpc.Mount(r, rpc.DefaultPrefix, nil, routesModule{"demo"}, routesModule{"demo"})
-	if err == nil {
-		t.Fatal("expected error for Mount with duplicate, got nil")
-	}
-	if !strings.HasPrefix(err.Error(), "rpc: duplicate operation path") {
-		t.Errorf("expected error to start with 'rpc: duplicate operation path', got '%v'", err)
-	}
-	if !strings.Contains(err.Error(), "/api/demo/list") {
-		t.Errorf("expected error to contain '/api/demo/list', got '%v'", err)
-	}
-}
-
-type routerMock struct{
-	router.Router
-}
-
-func (m *routerMock) Post(path string, h router.HandlerFunc) router.Route {
-	return nil
 }

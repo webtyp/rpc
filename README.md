@@ -1,78 +1,52 @@
 # rpc: domain operations over plain HTTP
 <img src="docs/img/badges.svg">
 
-This package provides an HTTP binding for `router.OperationModule`.
+HTTP transport binding for `crud.Module` operations mounted via `crud.Mount`.
 
-Each operation becomes its own route, with the permission, arguments, and description the module declared, so it is visible in `Router.Routes()`, served by any `router.Router` implementation, and callable from the browser.
+Each operation becomes its own POST route (`POST <prefix>/<Module>/<op>`), with the permission, arguments, and description derived by `crud.Mount`.
 
-`rpc.Routes(prefix, modules...)` lists the routes `Mount` would create, with their access, without a server (used by a module's demo for its API explorer).
+## Why This Exists
 
-## Prior art
+Provides a clean JSON RPC transport over HTTP without inventing REST verb mappings. Operates directly on `crud.Module` instances and routes requests through centralized validation.
 
-- **Connect RPC** (Buf): `POST /<package>.<Service>/<Method>`, JSON body, status codes mapped from errors, no REST verb mapping. Our shape.
-- **Twirp** (Twitch): `POST /twirp/<package>.<Service>/<Method>` with JSON; deliberately not REST, one URL per procedure.
-- **tRPC**: `/trpc/<router>.<procedure>`; a typed client generated from the server's procedures. Same idea as our `Caller`, without code generation because the args are already typed models.
-- **REST (Rails resources, JAX-RS)**: rejected. Our operations are named commands (`change_reservation_status`, `overbook`), and mapping them onto CRUD verbs loses meaning and duplicates decisions the module already made.
+## Before You Start
 
-## Security Rule: 415/CSRF
+- Domain modules implement `crud.Module` (`ModelName() string` and `MountOperations(reg crud.Registry)`).
+- Public reads are declared explicitly by the application composition root via `public []model.ModuleNaming`.
+- Errors over HTTP are written via [`router.WriteError`](https://github.com/webtyp/router).
 
-The `Content-Type` header of all requests must exactly be `application/json`.
+## Step-by-Step Guide
 
-If it is not, the request will fail with a `415` HTTP status code and an error body `rpc: Content-Type must be application/json` without calling the handler.
-
-**Why**: the native server also decodes HTML form bodies; a cross-site `<form method=post>` cannot send `application/json` without a CORS preflight, so this closes CSRF for cookie-authenticated operations.
-
-## Example
+Mount operations on the server:
 
 ```go
 // server (composition root)
-if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, booking, patients, records); err != nil {
+if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, logFunc, nil, patients); err != nil {
     return err
 }
-// browser (composition root)
+
+// client (in browser or caller)
 caller := rpc.NewCaller("")
-view, _ := patientsui.Browser(caller, ids, tenantID)
+var list PatientList
+caller.Call("patient_directory."+crud.Op(&Patient{}, model.Read), &crud.ReadArgs{Limit: 20}, &list, func(err error) {
+    if err != nil {
+        log.Println(err)
+    }
+})
 ```
 
-## Errors
+## Security & Errors
 
-The browser asks the same questions as the server: `model.KindOf(err)` and `model.FieldOf(err)` answer the `*rpc.Error` that `Call` returns (its status gives the kind; a network failure is internal), so a screen never needs to know which transport answered.
+- **415 / CSRF:** All requests must send `Content-Type: application/json`. Non-JSON requests are rejected with 415.
+- **Problem Details:** Handlers and `crud.Mount` write RFC 9457 responses via `router.WriteError`. Client calls return `*rpc.Error` compatible with `model.KindOf(err)` and `model.FieldOf(err)`.
+- **Idempotency:** `caller.CallKeyed(op, key, body, into, done)` sends the `Idempotency-Key` header for safe retries.
 
-`rpc.WriteError` maps an error to an RFC 9457 `application/problem+json` response:
+## Documentation Map
 
-| Error kind | HTTP Status |
+| Document | Purpose |
 |---|---|
-| `model.ErrorInvalid` | 400 |
-| `model.ErrorNotFound` | 404 |
-| `model.ErrorConflict` | 409 |
-| (unclassified) | 500 |
-
-The response body has this shape:
-```json
-{"status":400,"title":"invalid","detail":"name required","field":"name"}
-```
-
-Use it as a one-liner in handlers:
-```go
-if err != nil {
-    rpc.WriteError(ctx, err)
-    return
-}
-```
-
-For 500s, the detail sent to the client is always "internal error". The real error message is passed to the logger provided to `Mount(r, prefix, log, modules...)`.
-
-On the client side, `rpc.Error` has `Detail` and `Field` fields populated when the server sends a problem detail.
-
-## Retrying safely (Idempotency)
-
-To resend an operation without running it twice, call `CallKeyed` with a key that identifies that
-one mutation (for example the id an outbox gave it) and the args **already encoded as JSON**:
-
-```go
-caller.CallKeyed("booking.create_reservation", mutationID, encodedArgs, &out, done)
-```
-
-It sends the header `router.HeaderIdempotencyKey` (`Idempotency-Key`). The server must run the
-`webtyp.com/idempotency` middleware for a repeated send to be answered once. An empty key is refused
-before anything is sent (`*rpc.Error` with `Status` 0); an empty body is sent as `{}`.
+| [`mount.go`](mount.go) | `rpc.Mount` and `rpc.Routes` mounting `crud.Module` |
+| [`caller.go`](caller.go) | Client `rpc.Caller` implementation |
+| [`errors.go`](errors.go) | Client error decoding and kind reporting |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Architectural details and wire patterns |
+| [`docs/TESTS.md`](docs/TESTS.md) | Test suite map |

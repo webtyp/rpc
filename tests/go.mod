@@ -5,8 +5,8 @@ go 1.26.8
 replace webtyp.com/rpc => ../
 
 require (
-	webtyp.com/fmt v1.0.0
-	webtyp.com/model v0.2.12
+	webtyp.com/crud v0.0.2
+	webtyp.com/model v0.2.13
 	webtyp.com/router v0.4.17
 	webtyp.com/rpc v0.2.16
 	webtyp.com/server v0.2.114
@@ -29,6 +29,13 @@ require (
 	webtyp.com/escape v0.1.0 // indirect
 	webtyp.com/fetch v0.1.29 // indirect
 	webtyp.com/filepath v0.1.0 // indirect
+	webtyp.com/fmt v1.0.0 // indirect
 	webtyp.com/json v0.5.40 // indirect
 	webtyp.com/pwa v0.2.13 // indirect
 )
+
+replace webtyp.com/model => ../../model
+
+replace webtyp.com/router => ../../router
+
+replace webtyp.com/crud => ../../crud

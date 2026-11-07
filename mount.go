@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"webtyp.com/crud"
 	"webtyp.com/fmt"
 	"webtyp.com/model"
 	"webtyp.com/router"
@@ -75,10 +76,10 @@ func (c collectingRoute) Describe(desc string) router.Route {
 
 // Routes returns the route every operation of every module gets under prefix
 // (POST <prefix>/<ModelName>/<op>), with the access, arguments and description
-// it declared — without a server. Mount validates through it.
+// it declared — without a server. Public reads come from the app, never from a module.
 //
-// Example: routes, err := rpc.Routes(rpc.DefaultPrefix, accessMod)
-func Routes(prefix string, modules ...router.OperationModule) ([]router.RouteInfo, error) {
+// Example: routes, err := rpc.Routes(rpc.DefaultPrefix, publicReads, accessMod)
+func Routes(prefix string, public []model.ModuleNaming, modules ...crud.Module) ([]router.RouteInfo, error) {
 	if len(prefix) == 0 || prefix[0] != '/' || prefix[len(prefix)-1] == '/' {
 		return nil, errBadPrefix
 	}
@@ -89,7 +90,9 @@ func Routes(prefix string, modules ...router.OperationModule) ([]router.RouteInf
 			return nil, errEmptyModelName
 		}
 		col.module = modName
-		m.MountOperations(col)
+		if err := crud.Mount(col, public, m); err != nil {
+			return nil, err
+		}
 	}
 	for i := 0; i < len(col.routes); i++ {
 		for j := i + 1; j < len(col.routes); j++ {
@@ -122,7 +125,7 @@ func guard(h router.HandlerFunc, path string, log func(...any)) router.HandlerFu
 			return
 		}
 		h(c)
-		if d := c.Value(ctxKeyInternal); d != "" && log != nil {
+		if d := router.InternalError(c); d != "" && log != nil {
 			log("rpc:", path, "internal error:", d)
 		}
 	}
@@ -130,11 +133,12 @@ func guard(h router.HandlerFunc, path string, log func(...any)) router.HandlerFu
 
 // Mount registers every operation of every module as POST <prefix>/<ModelName>/<op> on r, with
 // the access, arguments and description the module declared on the returned Route.
+// Public reads come from the app, never from a module.
 // It returns an error, and mounts nothing, when a module has an empty ModelName(), when prefix
 // does not start with "/" or ends with "/", or when two operations resolve to the same path.
 // log is an optional logger called when an operation returns a 500 internal error.
-func Mount(r router.Router, prefix string, log func(...any), modules ...router.OperationModule) error {
-	if _, err := Routes(prefix, modules...); err != nil {
+func Mount(r router.Router, prefix string, log func(...any), public []model.ModuleNaming, modules ...crud.Module) error {
+	if _, err := Routes(prefix, public, modules...); err != nil {
 		return err
 	}
 
@@ -145,7 +149,9 @@ func Mount(r router.Router, prefix string, log func(...any), modules ...router.O
 	}
 	for _, m := range modules {
 		act.module = m.ModelName()
-		m.MountOperations(act)
+		if err := crud.Mount(act, public, m); err != nil {
+			return err
+		}
 	}
 
 	return nil
