@@ -5,9 +5,9 @@ go 1.26.8
 replace webtyp.com/rpc => ../
 
 require (
-	webtyp.com/crud v0.0.2
-	webtyp.com/model v0.2.13
-	webtyp.com/router v0.4.17
+	webtyp.com/crud v0.0.3
+	webtyp.com/model v0.2.14
+	webtyp.com/router v0.4.19
 	webtyp.com/rpc v0.2.16
 	webtyp.com/server v0.2.114
 )
