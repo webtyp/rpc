@@ -6,7 +6,7 @@ replace webtyp.com/rpc => ../
 
 require (
 	webtyp.com/crud v0.0.3
-	webtyp.com/model v0.2.14
+	webtyp.com/model v0.2.15
 	webtyp.com/router v0.4.19
 	webtyp.com/rpc v0.2.16
 	webtyp.com/server v0.2.114
@@ -33,8 +33,6 @@ require (
 	webtyp.com/json v0.5.40 // indirect
 	webtyp.com/pwa v0.2.13 // indirect
 )
-
-replace webtyp.com/model => ../../model
 
 replace webtyp.com/router => ../../router
 
