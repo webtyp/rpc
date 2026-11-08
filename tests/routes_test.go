@@ -6,6 +6,7 @@ import (
 
 	"webtyp.com/crud"
 	"webtyp.com/model"
+	"webtyp.com/router"
 	"webtyp.com/rpc"
 )
 
@@ -13,10 +14,11 @@ type routeItem struct {
 	ID string
 }
 
-func (r *routeItem) ModelName() string { return "route_item" }
-func (r *routeItem) IsNil() bool       { return r == nil }
+func (r *routeItem) Allow() model.Action { return model.Create | model.Read }
+func (r *routeItem) ModelName() string   { return "route_item" }
+func (r *routeItem) IsNil() bool         { return r == nil }
 func (r *routeItem) Schema() []model.Field {
-	return []model.Field{{Name: "id", Type: model.Text()}}
+	return []model.Field{{Name: "id", Type: model.Text(), DB: &model.FieldDB{PK: true}}}
 }
 func (r *routeItem) Pointers() []any                  { return []any{&r.ID} }
 func (r *routeItem) EncodeFields(w model.FieldWriter) { w.String("id", r.ID) }
@@ -35,14 +37,12 @@ type routesModule struct{ name string }
 
 func (m routesModule) ModelName() string { return m.name }
 func (m routesModule) MountOperations(reg crud.Registry) {
-	reg.Read(&routeItem{}, nil, func(c crud.Caller, args crud.ReadArgs, filter model.Model) (model.ModelSlice, error) {
-		out := routeItemList{}
-		return &out, nil
-	}).Describe("read items")
-
-	reg.Create(func() model.ModelSlice { return &routeItemList{} }, func(c crud.Caller, list model.ModelSlice) error {
-		return nil
-	}).RequiresMFA().Describe("create items")
+	reg.Table(crud.Table{
+		Model:   &routeItem{},
+		NewList: func() model.ModelSlice { return &routeItemList{} },
+		Store:   fakeStore{},
+		MFA:     model.Create,
+	})
 }
 
 func TestRoutes_Declarations(t *testing.T) {
@@ -55,14 +55,22 @@ func TestRoutes_Declarations(t *testing.T) {
 		t.Fatalf("expected 2 routes, got %d", len(routes))
 	}
 
-	r0 := routes[0]
-	if r0.Method != "POST" || r0.Path != "/api/demo/route_item_r" || r0.Resource != "route_item" || r0.Action != model.Read || r0.Access != 0 || r0.MFA || r0.Description != "read items" {
-		t.Errorf("route 0 mismatch: %+v", r0)
+	var rCreate, rRead *router.RouteInfo
+	for i := range routes {
+		if routes[i].Action == model.Create {
+			rCreate = &routes[i]
+		} else if routes[i].Action == model.Read {
+			rRead = &routes[i]
+		}
 	}
-
-	r1 := routes[1]
-	if r1.Method != "POST" || r1.Path != "/api/demo/route_item_c" || r1.Resource != "route_item" || r1.Action != model.Create || r1.Access != 0 || !r1.MFA || r1.Description != "create items" {
-		t.Errorf("route 1 mismatch: %+v", r1)
+	if rCreate == nil || rRead == nil {
+		t.Fatalf("expected create and read routes, got %+v", routes)
+	}
+	if rCreate.Method != "POST" || rCreate.Path != "/api/demo/route_item_c" || rCreate.Resource != "route_item" || !rCreate.MFA || rCreate.Description != "Create route_item" {
+		t.Errorf("create route mismatch: %+v", rCreate)
+	}
+	if rRead.Method != "POST" || rRead.Path != "/api/demo/route_item_r" || rRead.Resource != "route_item" || rRead.MFA || rRead.Description != "Read route_item" {
+		t.Errorf("read route mismatch: %+v", rRead)
 	}
 }
 
@@ -103,7 +111,7 @@ func TestRoutes_Duplicate(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "rpc: duplicate operation path") {
 		t.Errorf("expected error to start with 'rpc: duplicate operation path', got '%v'", err)
 	}
-	if !strings.Contains(err.Error(), "/api/demo/route_item_r") {
-		t.Errorf("expected error to contain '/api/demo/route_item_r', got '%v'", err)
+	if !strings.Contains(err.Error(), "/api/demo/route_item_c") {
+		t.Errorf("expected error to contain '/api/demo/route_item_c', got '%v'", err)
 	}
 }

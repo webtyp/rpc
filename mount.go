@@ -76,10 +76,10 @@ func (c collectingRoute) Describe(desc string) router.Route {
 
 // Routes returns the route every operation of every module gets under prefix
 // (POST <prefix>/<ModelName>/<op>), with the access, arguments and description
-// it declared — without a server. Public reads come from the app, never from a module.
+// it declared — without a server. Public actions come from the app (`crud.Public`), never from a module.
 //
-// Example: routes, err := rpc.Routes(rpc.DefaultPrefix, publicReads, accessMod)
-func Routes(prefix string, public []model.ModuleNaming, modules ...crud.Module) ([]router.RouteInfo, error) {
+// Example: routes, err := rpc.Routes(rpc.DefaultPrefix, public, accessMod)
+func Routes(prefix string, public []crud.Public, modules ...crud.Module) ([]router.RouteInfo, error) {
 	if len(prefix) == 0 || prefix[0] != '/' || prefix[len(prefix)-1] == '/' {
 		return nil, errBadPrefix
 	}
@@ -133,11 +133,11 @@ func guard(h router.HandlerFunc, path string, log func(...any)) router.HandlerFu
 
 // Mount registers every operation of every module as POST <prefix>/<ModelName>/<op> on r, with
 // the access, arguments and description the module declared on the returned Route.
-// Public reads come from the app, never from a module.
+// Public actions come from the app (`crud.Public`), never from a module.
 // It returns an error, and mounts nothing, when a module has an empty ModelName(), when prefix
 // does not start with "/" or ends with "/", or when two operations resolve to the same path.
 // log is an optional logger called when an operation returns a 500 internal error.
-func Mount(r router.Router, prefix string, log func(...any), public []model.ModuleNaming, modules ...crud.Module) error {
+func Mount(r router.Router, prefix string, log func(...any), public []crud.Public, modules ...crud.Module) error {
 	if _, err := Routes(prefix, public, modules...); err != nil {
 		return err
 	}

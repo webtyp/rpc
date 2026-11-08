@@ -12,6 +12,7 @@ import (
 	"webtyp.com/router"
 	"webtyp.com/rpc"
 	"webtyp.com/server/httpd"
+	"webtyp.com/storage"
 )
 
 type mockRecord struct {
@@ -19,12 +20,13 @@ type mockRecord struct {
 	Msg string
 }
 
-func (m *mockRecord) ModelName() string { return "mock_rec" }
-func (m *mockRecord) IsNil() bool       { return m == nil }
+func (m *mockRecord) Allow() model.Action { return model.AllActions }
+func (m *mockRecord) ModelName() string   { return "mock_rec" }
+func (m *mockRecord) IsNil() bool         { return m == nil }
 func (m *mockRecord) Schema() []model.Field {
 	return []model.Field{
-		{Name: "id", Type: model.Text()},
-		{Name: "msg", Type: model.Text()},
+		{Name: "id", Type: model.Text(), DB: &model.FieldDB{PK: true}},
+		{Name: "msg", Type: model.Text(), Item: model.ItemLabel},
 	}
 }
 func (m *mockRecord) Pointers() []any                  { return []any{&m.ID, &m.Msg} }
@@ -43,6 +45,27 @@ func (s *mockRecordList) IsNil() bool                      { return s == nil }
 func (s *mockRecordList) EncodeFields(_ model.FieldWriter) {}
 func (s *mockRecordList) DecodeFields(_ model.FieldReader) {}
 
+type fakeStore struct{}
+
+func (fakeStore) ReadOne(rec model.Model, id string) error { return nil }
+func (fakeStore) ReadAll(newRow func() model.Model, q crud.Query, onRow func(model.Model)) error {
+	m := newRow()
+	*m.Pointers()[0].(*string) = "1"
+	if len(q.Conditions) > 0 {
+		if s, ok := q.Conditions[0].Value().(string); ok {
+			*m.Pointers()[1].(*string) = s
+		}
+	}
+	onRow(m)
+	return nil
+}
+func (fakeStore) Create(rec model.Model) error { return nil }
+func (fakeStore) UpdateFields(rec model.Model, id string, fields []string) error {
+	return nil
+}
+func (fakeStore) Delete(rec model.Model, id string) error { return nil }
+func (fakeStore) NewID() string                           { return "1" }
+
 type mockModule struct{}
 
 var (
@@ -52,25 +75,20 @@ var (
 
 func (m mockModule) ModelName() string { return "testmod" }
 func (m mockModule) MountOperations(reg crud.Registry) {
-	reg.Create(func() model.ModelSlice { return &mockRecordList{} }, func(c crud.Caller, list model.ModelSlice) error {
-		// Used by echo test
-		return nil
-	}).Describe("Creates records")
-
-	reg.Read(&mockRecord{}, nil, func(c crud.Caller, args crud.ReadArgs, filter model.Model) (model.ModelSlice, error) {
-		out := mockRecordList{
-			&mockRecord{ID: "1", Msg: args.Search},
-		}
-		return &out, nil
-	}).Describe("Reads records")
-
-	reg.Update(func() model.Model { return &mockRecord{} }, func(c crud.Caller, ids, fields []string, rec model.Model) error {
-		keyHits.Add(1)
-		return nil
-	})
-
-	reg.Delete(&mockRecord{}, func(c crud.Caller, ids []string) error {
-		return model.Conflict("taken")
+	reg.Table(crud.Table{
+		Model:   &mockRecord{},
+		NewList: func() model.ModelSlice { return &mockRecordList{} },
+		Store:   fakeStore{},
+		Search: func(c crud.Caller, text string) ([]storage.Condition, error) {
+			return []storage.Condition{storage.Eq("msg", text)}, nil
+		},
+		Update: func(c crud.Caller, tx crud.Tx, old, next model.Model, fields []string) error {
+			keyHits.Add(1)
+			return nil
+		},
+		Delete: func(c crud.Caller, tx crud.Tx, rec model.Model) error {
+			return model.Conflict("taken")
+		},
 	})
 }
 
@@ -90,7 +108,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, router.Router) {
 			}
 		},
 	})
-	if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, nil, []model.ModuleNaming{&mockRecord{}}, mockModule{}); err != nil {
+	if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, nil, []crud.Public{{Model: &mockRecord{}, Actions: model.Read}}, mockModule{}); err != nil {
 		t.Fatalf("Mount failed: %v", err)
 	}
 
@@ -200,8 +218,8 @@ func TestRPCRoutes(t *testing.T) {
 			if route.Access != model.AccessPublic {
 				t.Errorf("read route should be public, got %v", route.Access)
 			}
-			if route.Description != "Reads records" {
-				t.Errorf("expected desc 'Reads records', got %s", route.Description)
+			if route.Description != "Read mock_rec" {
+				t.Errorf("expected desc 'Read mock_rec', got %s", route.Description)
 			}
 		}
 		if route.Method == "POST" && route.Path == "/api/testmod/mock_rec_c" {

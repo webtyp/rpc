@@ -5,7 +5,7 @@ go 1.26.8
 replace webtyp.com/rpc => ../
 
 require (
-	webtyp.com/crud v0.0.3
+	webtyp.com/crud v0.0.4
 	webtyp.com/model v0.2.15
 	webtyp.com/router v0.4.19
 	webtyp.com/rpc v0.2.16
@@ -26,12 +26,15 @@ require (
 	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
 	howett.net/plist v1.0.0 // indirect
+	webtyp.com/calendar v0.1.0 // indirect
 	webtyp.com/escape v0.1.0 // indirect
 	webtyp.com/fetch v0.1.29 // indirect
 	webtyp.com/filepath v0.1.0 // indirect
 	webtyp.com/fmt v1.0.0 // indirect
 	webtyp.com/json v0.5.40 // indirect
 	webtyp.com/pwa v0.2.13 // indirect
+	webtyp.com/storage v0.1.18 // indirect
+	webtyp.com/time v0.6.4 // indirect
 )
 
 replace webtyp.com/router => ../../router

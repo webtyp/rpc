@@ -14,10 +14,11 @@ type publicRec struct {
 	ID string
 }
 
-func (r *publicRec) ModelName() string { return "rec" }
-func (r *publicRec) IsNil() bool       { return r == nil }
+func (r *publicRec) Allow() model.Action { return model.Create | model.Read }
+func (r *publicRec) ModelName() string   { return "rec" }
+func (r *publicRec) IsNil() bool         { return r == nil }
 func (r *publicRec) Schema() []model.Field {
-	return []model.Field{{Name: "id", Type: model.Text()}}
+	return []model.Field{{Name: "id", Type: model.Text(), DB: &model.FieldDB{PK: true}}}
 }
 func (r *publicRec) Pointers() []any                  { return []any{&r.ID} }
 func (r *publicRec) EncodeFields(w model.FieldWriter) { w.String("id", r.ID) }
@@ -36,17 +37,44 @@ type publicTestMod struct{}
 
 func (publicTestMod) ModelName() string { return "pubmod" }
 func (publicTestMod) MountOperations(reg crud.Registry) {
-	reg.Read(&publicRec{}, nil, func(c crud.Caller, args crud.ReadArgs, filter model.Model) (model.ModelSlice, error) {
-		out := publicRecList{}
-		return &out, nil
-	})
-	reg.Create(func() model.ModelSlice { return &publicRecList{} }, func(c crud.Caller, list model.ModelSlice) error {
-		return nil
+	reg.Table(crud.Table{
+		Model:   &publicRec{},
+		NewList: func() model.ModelSlice { return &publicRecList{} },
+		Store:   fakeStore{},
 	})
 }
 
-func TestRoutes_PublicReadFromApp(t *testing.T) {
-	routes, err := rpc.Routes("/api", []model.ModuleNaming{&publicRec{}}, publicTestMod{})
+func TestRoutes_PublicCreate(t *testing.T) {
+	routes, err := rpc.Routes("/api", []crud.Public{{Model: &publicRec{}, Actions: model.Create}}, publicTestMod{})
+	if err != nil {
+		t.Fatalf("unexpected Routes error: %v", err)
+	}
+
+	var foundRead, foundCreate bool
+	for _, r := range routes {
+		if r.Path == "/api/pubmod/rec_c" {
+			foundCreate = true
+			if r.Access != model.AccessPublic {
+				t.Errorf("expected rec_c to have AccessPublic, got %v", r.Access)
+			}
+		}
+		if r.Path == "/api/pubmod/rec_r" {
+			foundRead = true
+			if r.Access == model.AccessPublic {
+				t.Errorf("expected rec_r to NOT have AccessPublic")
+			}
+		}
+	}
+	if !foundCreate {
+		t.Errorf("rec_c route not found")
+	}
+	if !foundRead {
+		t.Errorf("rec_r route not found")
+	}
+}
+
+func TestRoutes_PublicReadStillWorks(t *testing.T) {
+	routes, err := rpc.Routes("/api", []crud.Public{{Model: &publicRec{}, Actions: model.Read}}, publicTestMod{})
 	if err != nil {
 		t.Fatalf("unexpected Routes error: %v", err)
 	}
@@ -61,8 +89,8 @@ func TestRoutes_PublicReadFromApp(t *testing.T) {
 		}
 		if r.Path == "/api/pubmod/rec_c" {
 			foundCreate = true
-			if r.Resource != "rec" || r.Action != model.Create {
-				t.Errorf("expected rec_c to have Resource=rec, Action=Create; got %v %v", r.Resource, r.Action)
+			if r.Access == model.AccessPublic {
+				t.Errorf("expected rec_c to NOT have AccessPublic")
 			}
 		}
 	}
@@ -96,7 +124,7 @@ type errWiringMod struct{}
 
 func (errWiringMod) ModelName() string { return "errmod" }
 func (errWiringMod) MountOperations(reg crud.Registry) {
-	reg.Delete(&publicRec{}, nil)
+	reg.Table(crud.Table{})
 }
 
 func TestMount_CrudWiringErrorStopsMount(t *testing.T) {
