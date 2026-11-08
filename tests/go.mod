@@ -8,8 +8,9 @@ require (
 	webtyp.com/crud v0.0.4
 	webtyp.com/model v0.2.15
 	webtyp.com/router v0.4.19
-	webtyp.com/rpc v0.2.16
+	webtyp.com/rpc v0.2.18
 	webtyp.com/server v0.2.119
+	webtyp.com/storage v0.1.18
 )
 
 require (
@@ -33,7 +34,6 @@ require (
 	webtyp.com/fmt v1.0.0 // indirect
 	webtyp.com/json v0.5.40 // indirect
 	webtyp.com/pwa v0.2.13 // indirect
-	webtyp.com/storage v0.1.18 // indirect
 	webtyp.com/time v0.6.4 // indirect
 )
 
