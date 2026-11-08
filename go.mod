@@ -3,7 +3,7 @@ module webtyp.com/rpc
 go 1.26.8
 
 require (
-	webtyp.com/crud v0.0.4
+	webtyp.com/crud v0.0.5
 	webtyp.com/fetch v0.1.29
 	webtyp.com/fmt v1.0.0
 	webtyp.com/json v0.5.40
