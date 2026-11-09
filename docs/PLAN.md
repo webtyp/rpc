@@ -2,14 +2,13 @@
 PLAN: "refactor!: operations travel as REST (POST|GET|PATCH|DELETE /api/<module>/<entity>); the client and the server share one mapping from router.Operation"
 EXECUTOR: jules
 REVIEWER: none
-STATUS: running
-SESSION: 14072297148331709481
 ---
 
 > Read AGENTS.md at the repo root before any change.
 > **Finish by yourself:** when the delivery check passes, commit after every stage, push and open the pull request. Never ask whether to
 > proceed or finalize — nobody answers, and a session that waits ends without your work.
 > Never run `git reset`, `git restore`, `git checkout -- <file>` or `git stash` on your own work.
+> **The last step is `git push` and `gh pr create`; your final message is the pull request link, never a question.** A session that ends with a question has delivered nothing.
 
 ## Goal
 
