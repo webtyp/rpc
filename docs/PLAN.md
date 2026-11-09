@@ -2,6 +2,8 @@
 PLAN: "refactor!: operations travel as REST (POST|GET|PATCH|DELETE /api/<module>/<entity>); the client and the server share one mapping from router.Operation"
 EXECUTOR: jules
 REVIEWER: none
+STATUS: running
+SESSION: 14760273422388366097
 ---
 
 > Read AGENTS.md at the repo root before any change.
