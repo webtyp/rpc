@@ -36,12 +36,27 @@ func (s *routeItemList) DecodeFields(_ model.FieldReader) {}
 type routesModule struct{ name string }
 
 func (m routesModule) ModelName() string { return m.name }
+func (m routesModule) Definition() model.ModuleDefinition {
+	return defOf(m.name, model.Definition{
+		Name:  "route_item",
+		Allow: model.Create | model.Read,
+		MFA:   model.Create,
+		Rules: model.Rules{
+			Create: model.HaveNoBusinessRule,
+			Read:   model.HaveNoBusinessRule,
+		},
+	})
+}
 func (m routesModule) MountOperations(reg crud.Registry) {
-	reg.Table(crud.Table{
+	reg.AddStoredEntity(crud.StoredEntity{
 		Model:   &routeItem{},
 		NewList: func() model.ModelSlice { return &routeItemList{} },
 		Store:   fakeStore{},
 		MFA:     model.Create,
+		Rules: model.Rules{
+			Create: model.HaveNoBusinessRule,
+			Read:   model.HaveNoBusinessRule,
+		},
 	})
 }
 
@@ -57,19 +72,20 @@ func TestRoutes_Declarations(t *testing.T) {
 
 	var rCreate, rRead *router.RouteInfo
 	for i := range routes {
-		if routes[i].Action == model.Create {
+		switch routes[i].Action {
+		case model.Create:
 			rCreate = &routes[i]
-		} else if routes[i].Action == model.Read {
+		case model.Read:
 			rRead = &routes[i]
 		}
 	}
 	if rCreate == nil || rRead == nil {
 		t.Fatalf("expected create and read routes, got %+v", routes)
 	}
-	if rCreate.Method != "POST" || rCreate.Path != "/api/demo/route_item_c" || rCreate.Resource != "route_item" || !rCreate.MFA || rCreate.Description != "Create route_item" {
+	if rCreate.Method != "POST" || rCreate.Path != "/api/demo/route_item" || rCreate.Resource != "route_item" || !rCreate.MFA || rCreate.Description != "Create route_item" {
 		t.Errorf("create route mismatch: %+v", rCreate)
 	}
-	if rRead.Method != "POST" || rRead.Path != "/api/demo/route_item_r" || rRead.Resource != "route_item" || rRead.MFA || rRead.Description != "Read route_item" {
+	if rRead.Method != "GET" || rRead.Path != "/api/demo/route_item" || rRead.Resource != "route_item" || rRead.MFA || rRead.Description != "Read route_item" {
 		t.Errorf("read route mismatch: %+v", rRead)
 	}
 }
@@ -111,7 +127,7 @@ func TestRoutes_Duplicate(t *testing.T) {
 	if !strings.HasPrefix(err.Error(), "rpc: duplicate operation path") {
 		t.Errorf("expected error to start with 'rpc: duplicate operation path', got '%v'", err)
 	}
-	if !strings.Contains(err.Error(), "/api/demo/route_item_c") {
-		t.Errorf("expected error to contain '/api/demo/route_item_c', got '%v'", err)
+	if !strings.Contains(err.Error(), "POST /api/demo/route_item") {
+		t.Errorf("expected error to contain 'POST /api/demo/route_item', got '%v'", err)
 	}
 }

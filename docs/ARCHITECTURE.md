@@ -1,35 +1,47 @@
-# rpc: domain operations over plain HTTP
+# Architecture: rpc
 
-This package provides an HTTP transport binding for `crud.Module` operations mounted via `crud.Mount`.
+HTTP transport binding for domain operations mounted via `crud.Mount`. Operations travel as REST requests where the HTTP method is the action and the path is the resource.
 
-Each operation becomes its own route, with the permission, arguments, and description derived by `crud.Mount`, served by any `router.Router` implementation, and callable from client applications or browsers.
+## 1. Overview in One Minute
 
-## Prior art
+`rpc` connects domain modules (`crud.Module`) to HTTP networks. Instead of hiding verbs in URL suffixes (like `_c` or `_r`), each `router.Operation` maps directly to standard REST semantics:
 
-- **Connect RPC** (Buf): `POST /<package>.<Service>/<Method>`, JSON body, status codes mapped from errors, no REST verb mapping. Our shape.
-- **Twirp** (Twitch): `POST /twirp/<package>.<Service>/<Method>` with JSON; deliberately not REST, one URL per procedure.
-- **tRPC**: `/trpc/<router>.<procedure>`; a typed client generated from the server's procedures. Same idea as our `Caller`, without code generation because the args are already typed models.
-- **REST (Rails resources, JAX-RS)**: rejected. Our operations are typed domain operations, and mapping them onto arbitrary HTTP paths loses contract guarantees.
+| `router.Operation.Action` | Method | Path | Arguments |
+|---|---|---|---|
+| `model.Create` | `POST` | `/api/<module>/<entity>` | JSON body `{records}` |
+| `model.Read` | `GET` | `/api/<module>/<entity>` | Query string (`id`, `search`, `after`, `limit`, `filter.<field>`) |
+| `model.Update` | `PATCH` | `/api/<module>/<entity>` | JSON body `{ids, fields, record}` |
+| `model.Delete` | `DELETE` | `/api/<module>/<entity>` | JSON body `{ids}` |
 
-## Errors
+The mapping lives in `requestOf` in `request.go` and is shared between server mounting (`rpc.Mount`) and client calling (`rpc.Caller`), guaranteeing the client and server cannot drift apart.
 
-Error writing is centralized in `router.WriteError`, adhering to RFC 9457 (Problem Details for HTTP APIs). Unclassified errors (500) hide internal error text from clients, logging the real error server-side via `router.InternalError`.
+## 2. Repository Pieces & On-Disk Layout
 
-## Security Rule: 415/CSRF
+| File | Responsibility |
+|---|---|
+| `request.go` | Canonical mapping between `router.Operation` and HTTP method/path (`MethodOf`, `requestOf`). |
+| `mount.go` | Server registration (`rpc.Mount`, `rpc.Routes`) adapting `crud.Module` onto `router.Router`. |
+| `caller.go` | Client `router.Caller` implementation (`rpc.NewCaller`) executing REST requests via `webtyp.com/fetch`. |
+| `errors.go` | Wire error decoding and mapping to `model.ErrorKind`. |
 
-The `Content-Type` header of all requests must exactly be `application/json`.
-If it is not, the request fails with 415 Unsupported Media Type without calling the handler.
+## 3. Step-by-Step Flows
 
-## Example
+See [REST Flow Diagram](diagrams/REST_FLOW.md) for the visual flowchart.
 
-```go
-// server (composition root)
-if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, logFunc, nil, patients); err != nil {
-    return err
-}
+### The REST Mapping & Query Codec
+When a client calls `Caller.Call(op, args, into, done)`:
+- If `op.Action == model.Read` (`GET`), arguments are encoded as URL query parameters via `router.EncodeQuery`. Filter fields become `filter.<field>` query keys. No request body or `Content-Type` is sent.
+- If `op.Action` is a mutation (`POST`, `PATCH`, `DELETE`), arguments are encoded as a JSON payload using `webtyp.com/json`.
 
-// client
-caller := rpc.NewCaller("")
-var list PatientList
-caller.Call("patient_directory."+crud.Op(&Patient{}, model.Read), &crud.ReadArgs{Limit: 20}, &list, done)
-```
+On the server, `mock.Router` / `routertest.Serve` decodes arguments via `router.DecodeArgs`: reads query params for `GET` and JSON body for mutations.
+
+### Why a Read Has No Idempotency Key
+Idempotency keys (`router.HeaderIdempotencyKey`) exist to prevent duplicate mutations when network retries occur. A read (`GET`) is inherently idempotent and safe to repeat without side effects; setting an idempotency key on a read makes no sense. Consequently, `Caller.CallKeyed` explicitly refuses any operation with `model.Read` with a client-side error before network transmission.
+
+## 4. Security Boundaries & Contracts
+
+### Cache-Control: no-store
+Every response from an RPC endpoint carries `Cache-Control: no-store`. Sensitive business data (such as medical or user records) must never be cached by shared proxies, intermediary CDNs, or browser caches.
+
+### JSON Requirement for Mutations (CSRF Mitigation)
+All mutation methods (`POST`, `PATCH`, `DELETE`) require `Content-Type: application/json`. Any cross-site form submission (`application/x-www-form-urlencoded` or `multipart/form-data`) is rejected immediately by the `guard` middleware with HTTP 415 Unsupported Media Type before reaching domain handlers. Because standard browser HTML forms cannot post JSON without preflight cross-origin restrictions, this provides strong CSRF protection. A `GET` carries no body and requires no content type.

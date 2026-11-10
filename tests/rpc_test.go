@@ -10,8 +10,9 @@ import (
 	"webtyp.com/crud"
 	"webtyp.com/model"
 	"webtyp.com/router"
+	"webtyp.com/router/mock"
+	"webtyp.com/router/routertest"
 	"webtyp.com/rpc"
-	"webtyp.com/server/httpd"
 	"webtyp.com/storage"
 )
 
@@ -65,6 +66,7 @@ func (fakeStore) UpdateFields(rec model.Model, id string, fields []string) error
 }
 func (fakeStore) Delete(rec model.Model, id string) error { return nil }
 func (fakeStore) NewID() string                           { return "1" }
+func (fakeStore) Atomic(fn func(tx crud.Tx) error) error  { return fn(fakeStore{}) }
 
 type mockModule struct{}
 
@@ -74,51 +76,69 @@ var (
 )
 
 func (m mockModule) ModelName() string { return "testmod" }
+func (m mockModule) Definition() model.ModuleDefinition {
+	return defOf("testmod", model.Definition{
+		Name:  "mock_rec",
+		Allow: model.AllActions,
+		Rules: model.Rules{
+			Create: model.HaveNoBusinessRule,
+			Read:   model.AddMyBusinessRule,
+			Update: model.AddMyBusinessRule,
+			Delete: model.AddMyBusinessRule,
+		},
+	})
+}
 func (m mockModule) MountOperations(reg crud.Registry) {
-	reg.Table(crud.Table{
+	reg.AddStoredEntity(crud.StoredEntity{
 		Model:   &mockRecord{},
 		NewList: func() model.ModelSlice { return &mockRecordList{} },
 		Store:   fakeStore{},
-		Search: func(c crud.Caller, text string) ([]storage.Condition, error) {
+		Rules: model.Rules{
+			Create: model.HaveNoBusinessRule,
+			Read:   model.AddMyBusinessRule,
+			Update: model.AddMyBusinessRule,
+			Delete: model.AddMyBusinessRule,
+		},
+		Search: func(c crud.CurrentUser, text string) ([]storage.Condition, error) {
 			return []storage.Condition{storage.Eq("msg", text)}, nil
 		},
-		Update: func(c crud.Caller, tx crud.Tx, old, next model.Model, fields []string) error {
+		Update: func(c crud.CurrentUser, tx crud.Tx, old, next model.Model, fields []string) (crud.RuleAnswer, error) {
 			keyHits.Add(1)
-			return nil
+			return crud.ApplyAndPublish, nil
 		},
-		Delete: func(c crud.Caller, tx crud.Tx, rec model.Model) error {
-			return model.Conflict("taken")
+		Delete: func(c crud.CurrentUser, tx crud.Tx, rec model.Model) (crud.RuleAnswer, error) {
+			return 0, model.Conflict("taken")
 		},
 	})
 }
 
 func setupTestServer(t *testing.T) (*httptest.Server, router.Router) {
-	srv := httpd.New(httpd.Config{
+	r := &mock.Router{}
+	r.Configure(mock.Config{
 		Authorize: func(userID string, resource model.Resource, action model.Action) bool {
-			// mock_rec Create is forbidden for unauthorized test
-			if resource == "mock_rec" && action == model.Create {
+			// mock_rec Create is forbidden for test-user (used by TestRPCSecretUnauthorized)
+			if userID == "test-user" && resource == "mock_rec" && action == model.Create {
 				return false
 			}
 			return true
 		},
 		Authn: func(next router.HandlerFunc) router.HandlerFunc {
 			return func(c router.Context) {
-				c.SetUserID("test-user")
+				if c.GetHeader("Content-Type") == "application/x-www-form-urlencoded" {
+					c.SetUserID("csrf-user")
+				} else {
+					c.SetUserID("test-user")
+				}
 				next(c)
 			}
 		},
 	})
-	if err := rpc.Mount(srv.Router(), rpc.DefaultPrefix, nil, []crud.Public{{Model: &mockRecord{}, Actions: model.Read}}, mockModule{}); err != nil {
+	if err := rpc.Mount(r, rpc.DefaultPrefix, nil, []crud.Public{{Model: &mockRecord{}, Actions: model.Read}}, nil, mockModule{}); err != nil {
 		t.Fatalf("Mount failed: %v", err)
 	}
 
-	handler, err := srv.Handler()
-	if err != nil {
-		t.Fatalf("Handler failed: %v", err)
-	}
-
-	ts := httptest.NewServer(handler)
-	return ts, srv.Router()
+	ts := routertest.Serve(t, r)
+	return ts, r
 }
 
 func TestRPCEcho(t *testing.T) {
@@ -130,7 +150,7 @@ func TestRPCEcho(t *testing.T) {
 	var out mockRecordList
 
 	doneCh := make(chan error, 1)
-	caller.Call("testmod."+crud.Op(&mockRecord{}, model.Read), args, &out, func(err error) {
+	caller.Call(router.Operation{Module: "testmod", Entity: "mock_rec", Action: model.Read}, args, &out, func(err error) {
 		doneCh <- err
 	})
 
@@ -156,7 +176,7 @@ func TestRPCCallKeyed(t *testing.T) {
 	body := []byte(`{"ids":["id1"],"fields":["msg"],"record":{"msg":"keyed"}}`)
 
 	doneCh := make(chan error, 1)
-	caller.CallKeyed("testmod."+crud.Op(&mockRecord{}, model.Update), "k1", body, nil, func(err error) {
+	caller.CallKeyed(router.Operation{Module: "testmod", Entity: "mock_rec", Action: model.Update}, "k1", body, nil, func(err error) {
 		doneCh <- err
 	})
 
@@ -178,7 +198,7 @@ func TestRPCCallKeyedEmptyKey(t *testing.T) {
 	before := keyHits.Load()
 
 	doneCh := make(chan error, 1)
-	caller.CallKeyed("testmod."+crud.Op(&mockRecord{}, model.Update), "", []byte(`{}`), nil, func(err error) {
+	caller.CallKeyed(router.Operation{Module: "testmod", Entity: "mock_rec", Action: model.Update}, "", []byte(`{}`), nil, func(err error) {
 		doneCh <- err
 	})
 
@@ -213,7 +233,7 @@ func TestRPCRoutes(t *testing.T) {
 
 	var foundRead, foundCreate bool
 	for _, route := range routes {
-		if route.Method == "POST" && route.Path == "/api/testmod/mock_rec_r" {
+		if route.Method == "GET" && route.Path == "/api/testmod/mock_rec" {
 			foundRead = true
 			if route.Access != model.AccessPublic {
 				t.Errorf("read route should be public, got %v", route.Access)
@@ -222,7 +242,7 @@ func TestRPCRoutes(t *testing.T) {
 				t.Errorf("expected desc 'Read mock_rec', got %s", route.Description)
 			}
 		}
-		if route.Method == "POST" && route.Path == "/api/testmod/mock_rec_c" {
+		if route.Method == "POST" && route.Path == "/api/testmod/mock_rec" {
 			foundCreate = true
 			if route.Resource != "mock_rec" || route.Action != model.Create {
 				t.Errorf("create route requires mock_rec Create, got %s %v", route.Resource, route.Action)
@@ -248,7 +268,7 @@ func TestRPCSecretUnauthorized(t *testing.T) {
 	}
 
 	doneCh := make(chan error, 1)
-	caller.Call("testmod."+crud.Op(&mockRecord{}, model.Create), args, nil, func(err error) {
+	caller.Call(router.Operation{Module: "testmod", Entity: "mock_rec", Action: model.Create}, args, nil, func(err error) {
 		doneCh <- err
 	})
 
@@ -273,14 +293,22 @@ func TestRPCCSRF(t *testing.T) {
 	ts, _ := setupTestServer(t)
 	defer ts.Close()
 
-	resp, err := http.Post(ts.URL+"/api/testmod/mock_rec_r", "application/x-www-form-urlencoded", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
+	methods := []string{"POST", "PATCH", "DELETE"}
+	for _, m := range methods {
+		req, err := http.NewRequest(m, ts.URL+"/api/testmod/mock_rec", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
 
-	if resp.StatusCode != 415 {
-		t.Fatalf("expected 415, got %d", resp.StatusCode)
+		if resp.StatusCode != 415 {
+			t.Fatalf("method %s: expected 415, got %d", m, resp.StatusCode)
+		}
 	}
 }
 
@@ -291,7 +319,7 @@ func TestRPCConflict(t *testing.T) {
 	caller := rpc.NewCaller(ts.URL)
 
 	doneCh := make(chan error, 1)
-	caller.Call("testmod."+crud.Op(&mockRecord{}, model.Delete), &crud.DeleteArgs{IDs: []string{"id-1"}}, nil, func(err error) {
+	caller.Call(router.Operation{Module: "testmod", Entity: "mock_rec", Action: model.Delete}, &crud.DeleteArgs{IDs: []string{"id-1"}}, nil, func(err error) {
 		doneCh <- err
 	})
 
@@ -322,7 +350,7 @@ func TestRPCUnreachable(t *testing.T) {
 	caller := rpc.NewCaller(ts.URL)
 
 	doneCh := make(chan error, 1)
-	caller.Call("testmod."+crud.Op(&mockRecord{}, model.Read), nil, nil, func(err error) {
+	caller.Call(router.Operation{Module: "testmod", Entity: "mock_rec", Action: model.Read}, nil, nil, func(err error) {
 		doneCh <- err
 	})
 
@@ -344,24 +372,24 @@ func TestRPCUnreachable(t *testing.T) {
 }
 
 func TestRPCMountErrors(t *testing.T) {
-	r := httpd.NewRouter(http.NewServeMux())
+	r := &mock.Router{}
 
-	err := rpc.Mount(r, "api", nil, nil, mockModule{})
+	err := rpc.Mount(r, "api", nil, nil, nil, mockModule{})
 	if err == nil {
 		t.Fatal("expected error for bad prefix 'api'")
 	}
 
-	err = rpc.Mount(r, "/api/", nil, nil, mockModule{})
+	err = rpc.Mount(r, "/api/", nil, nil, nil, mockModule{})
 	if err == nil {
 		t.Fatal("expected error for bad prefix '/api/'")
 	}
 
-	err = rpc.Mount(r, rpc.DefaultPrefix, nil, nil, emptyModule{})
+	err = rpc.Mount(r, rpc.DefaultPrefix, nil, nil, nil, emptyModule{})
 	if err == nil {
 		t.Fatal("expected error for empty ModelName")
 	}
 
-	err = rpc.Mount(r, rpc.DefaultPrefix, nil, nil, mockModule{}, mockModule{})
+	err = rpc.Mount(r, rpc.DefaultPrefix, nil, nil, nil, mockModule{}, mockModule{})
 	if err == nil {
 		t.Fatal("expected error for duplicate op path")
 	}
@@ -369,33 +397,7 @@ func TestRPCMountErrors(t *testing.T) {
 
 type emptyModule struct{}
 
-func (emptyModule) ModelName() string                     { return "" }
-func (emptyModule) MountOperations(reg crud.Registry) {}
+func (emptyModule) ModelName() string                  { return "" }
+func (emptyModule) Definition() model.ModuleDefinition { return defOf("") }
+func (emptyModule) MountOperations(reg crud.Registry)  {}
 
-func TestRPCBadOp(t *testing.T) {
-	caller := rpc.NewCaller("")
-
-	doneCh := make(chan error, 1)
-	caller.Call("noDot", nil, nil, func(err error) {
-		doneCh <- err
-	})
-
-	select {
-	case err := <-doneCh:
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		e, ok := err.(*rpc.Error)
-		if !ok {
-			t.Fatalf("expected *rpc.Error, got %T", err)
-		}
-		if e.Status != 0 {
-			t.Fatalf("expected 0 status, got %d", e.Status)
-		}
-		if e.Body != "rpc: operation name must be <module>.<op>" {
-			t.Fatalf("expected bad op message, got %s", e.Body)
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timeout")
-	}
-}

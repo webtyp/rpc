@@ -9,7 +9,8 @@ import (
 
 const (
 	msgKeyRequired = "rpc: idempotency key is required"
-	msgBadOpName   = "rpc: operation name must be <module>.<op>"
+	msgKeyedRead   = "rpc: a read has no idempotency key; use Call"
+	msgBadOp       = "rpc: invalid operation: "
 )
 
 // Caller sends operations over HTTP. It implements router.Caller.
@@ -23,69 +24,92 @@ func NewCaller(origin string) *Caller {
 }
 
 // Dispatch is Call without a result: fire and forget.
-func (c *Caller) Dispatch(op string, args model.Encodable) {
+func (c *Caller) Dispatch(op router.Operation, args model.Encodable) {
 	c.Call(op, args, nil, nil)
 }
 
-// Call sends args as JSON to POST <origin>/api/<module>/<op> and decodes a 2xx answer into into.
-// Any other outcome reaches done as an *Error.
-func (c *Caller) Call(op string, args model.Encodable, into model.Decodable, done func(err error)) {
+// Call sends the operation as its REST request (see requestOf) and decodes a 2xx answer into into. A Read travels in the query,
+// the other actions as a JSON body. Any other outcome reaches done as an *Error.
+func (c *Caller) Call(op router.Operation, args model.Encodable, into model.Decodable, done func(err error)) {
+	method, path, ok := requestOf(DefaultPrefix, op)
+	if !ok {
+		c.fail(done, msgBadOp+op.String())
+		return
+	}
+	if !hasBody(method) { // GET: the arguments are the query
+		query := ""
+		if args != nil && !args.IsNil() {
+			q, err := router.EncodeQuery(args)
+			if err != nil {
+				c.fail(done, err.Error())
+				return
+			}
+			query = q
+		}
+		c.send(method, c.origin+path, query, "", nil, into, done)
+		return
+	}
 	var body []byte
 	if args == nil || args.IsNil() {
 		body = []byte("{}")
 	} else if err := json.Encode(args, &body); err != nil {
-		if done != nil {
-			done(&Error{Status: 0, Body: err.Error()})
-		}
+		c.fail(done, err.Error())
 		return
 	}
-	c.send(op, "", body, into, done)
+	c.send(method, c.origin+path, "", "", body, into, done)
 }
 
-// CallKeyed is Call with the request header router.HeaderIdempotencyKey set to key, so a server
-// running the idempotency middleware answers a repeated send once. key == "" → done receives an
-// *Error with Status 0 and Body "rpc: idempotency key is required" and nothing is sent.
-// body is the operation's args already encoded as JSON (as a queue stores them); empty sends "{}".
-func (c *Caller) CallKeyed(op, key string, body []byte, into model.Decodable, done func(err error)) {
+// CallKeyed is Call with the request header router.HeaderIdempotencyKey set to key, so a server running the idempotency middleware
+// answers a repeated send once. A read has no key (it is safe to repeat): CallKeyed refuses it. key == "" → done receives an *Error
+// with Status 0 and nothing is sent. body is the operation's args already encoded as JSON (as a queue stores them); empty sends "{}".
+func (c *Caller) CallKeyed(op router.Operation, key string, body []byte, into model.Decodable, done func(err error)) {
+	method, path, ok := requestOf(DefaultPrefix, op)
+	if !ok {
+		c.fail(done, msgBadOp+op.String())
+		return
+	}
+	if !hasBody(method) {
+		c.fail(done, msgKeyedRead)
+		return
+	}
 	if key == "" {
-		if done != nil {
-			done(&Error{Status: 0, Body: msgKeyRequired})
-		}
+		c.fail(done, msgKeyRequired)
 		return
 	}
 	if len(body) == 0 {
 		body = []byte("{}")
 	}
-	c.send(op, key, body, into, done)
+	c.send(method, c.origin+path, "", key, body, into, done)
 }
 
-func (c *Caller) send(op, key string, body []byte, into model.Decodable, done func(err error)) {
-	dotIdx := -1
-	for i := 0; i < len(op); i++ {
-		if op[i] == '.' {
-			if dotIdx != -1 {
-				dotIdx = -1 // more than one dot
-				break
-			}
-			dotIdx = i
-		}
+func (c *Caller) fail(done func(err error), text string) {
+	if done != nil {
+		done(&Error{Status: 0, Body: text})
 	}
-	if dotIdx == -1 {
-		if done != nil {
-			done(&Error{Status: 0, Body: msgBadOpName})
-		}
-		return
+}
+
+func (c *Caller) send(method, url, query, key string, body []byte, into model.Decodable, done func(err error)) {
+	if query != "" {
+		url += "?" + query
 	}
-
-	module := op[:dotIdx]
-	opName := op[dotIdx+1:]
-	url := c.origin + DefaultPrefix + slash + module + slash + opName
-
-	req := fetch.Post(url).ContentTypeJSON()
+	var req *fetch.Request
+	switch method {
+	case methodGet:
+		req = fetch.Get(url)
+	case methodPost:
+		req = fetch.Post(url)
+	case methodPatch:
+		req = fetch.Patch(url)
+	default:
+		req = fetch.Delete(url)
+	}
 	if key != "" {
 		req.Header(router.HeaderIdempotencyKey, key)
 	}
-	req.Body(body).Send(func(resp *fetch.Response, err error) {
+	if hasBody(method) {
+		req = req.ContentTypeJSON().Body(body)
+	}
+	req.Send(func(resp *fetch.Response, err error) {
 		if done == nil {
 			return
 		}

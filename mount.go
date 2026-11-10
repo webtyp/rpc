@@ -2,17 +2,17 @@ package rpc
 
 import (
 	"webtyp.com/crud"
+	"webtyp.com/events"
 	"webtyp.com/fmt"
 	"webtyp.com/model"
 	"webtyp.com/router"
 )
 
-// DefaultPrefix is where operations are mounted: POST /api/<module>/<op>.
+// DefaultPrefix is where operations are mounted: <METHOD> /api/<module>/<entity>.
 const DefaultPrefix = "/api"
 
 const (
 	slash                      = "/"
-	dot                        = "."
 	contentTypeJSON            = "application/json"
 	contentTypeName            = "Content-Type"
 	statusUnsupportedMediaType = 415
@@ -28,19 +28,38 @@ func errDuplicatePath(path string) error {
 	return fmt.Err("rpc: duplicate operation path", path)
 }
 
-const methodPost = "POST"
+func errInvalidOperation(op router.Operation) error {
+	return fmt.Err("rpc: invalid operation", op.String())
+}
 
 // collectingRegistry walks the operations and keeps the route each one gets.
 type collectingRegistry struct {
 	routes []router.RouteInfo
 	prefix string
-	module string
+	err    error
 }
 
-func (r *collectingRegistry) Operation(name string, h router.HandlerFunc) router.Route {
-	r.routes = append(r.routes, router.RouteInfo{Method: methodPost, Path: r.prefix + slash + r.module + slash + name})
+func (r *collectingRegistry) Operation(op router.Operation, h router.HandlerFunc) router.Route {
+	method, path, ok := requestOf(r.prefix, op)
+	if !ok {
+		if r.err == nil {
+			r.err = errInvalidOperation(op)
+		}
+		return inertRoute{}
+	}
+	r.routes = append(r.routes, router.RouteInfo{Method: method, Path: path})
 	return collectingRoute{reg: r, i: len(r.routes) - 1}
 }
+
+// inertRoute swallows the declarations of an operation that was refused; the registry reports the error.
+type inertRoute struct{}
+
+func (r inertRoute) Requires(model.Resource, model.Action) router.Route { return r }
+func (r inertRoute) Authenticated() router.Route                        { return r }
+func (r inertRoute) Public() router.Route                               { return r }
+func (r inertRoute) RequiresMFA() router.Route                          { return r }
+func (r inertRoute) Accepts(model.Fielder) router.Route                 { return r }
+func (r inertRoute) Describe(string) router.Route                       { return r }
 
 // collectingRoute records what an operation declares on its route.
 type collectingRoute struct {
@@ -75,7 +94,7 @@ func (c collectingRoute) Describe(desc string) router.Route {
 }
 
 // Routes returns the route every operation of every module gets under prefix
-// (POST <prefix>/<ModelName>/<op>), with the access, arguments and description
+// (<METHOD> <prefix>/<module>/<entity>), with the access, arguments and description
 // it declared — without a server. Public actions come from the app (`crud.Public`), never from a module.
 //
 // Example: routes, err := rpc.Routes(rpc.DefaultPrefix, public, accessMod)
@@ -85,19 +104,20 @@ func Routes(prefix string, public []crud.Public, modules ...crud.Module) ([]rout
 	}
 	col := &collectingRegistry{prefix: prefix}
 	for _, m := range modules {
-		modName := m.ModelName()
-		if modName == "" {
+		if m.ModelName() == "" {
 			return nil, errEmptyModelName
 		}
-		col.module = modName
-		if err := crud.Mount(col, public, m); err != nil {
+		if err := crud.Mount(col, public, nil, m); err != nil {
 			return nil, err
+		}
+		if col.err != nil {
+			return nil, col.err
 		}
 	}
 	for i := 0; i < len(col.routes); i++ {
 		for j := i + 1; j < len(col.routes); j++ {
-			if col.routes[i].Path == col.routes[j].Path {
-				return nil, errDuplicatePath(col.routes[i].Path)
+			if col.routes[i].Method == col.routes[j].Method && col.routes[i].Path == col.routes[j].Path {
+				return nil, errDuplicatePath(col.routes[i].Method + " " + col.routes[i].Path)
 			}
 		}
 	}
@@ -107,22 +127,40 @@ func Routes(prefix string, public []crud.Public, modules ...crud.Module) ([]rout
 type activeRegistry struct {
 	r      router.Router
 	prefix string
-	module string
 	log    func(...any)
+	err    error
 }
 
-func (r *activeRegistry) Operation(name string, h router.HandlerFunc) router.Route {
-	path := r.prefix + slash + r.module + slash + name
-	return r.r.Post(path, guard(h, path, r.log))
+func (r *activeRegistry) Operation(op router.Operation, h router.HandlerFunc) router.Route {
+	method, path, ok := requestOf(r.prefix, op)
+	if !ok {
+		if r.err == nil {
+			r.err = errInvalidOperation(op)
+		}
+		return inertRoute{}
+	}
+	g := guard(method, h, path, r.log)
+	switch method {
+	case methodGet:
+		return r.r.Get(path, g)
+	case methodPost:
+		return r.r.Post(path, g)
+	case methodDelete:
+		return r.r.Delete(path, g)
+	}
+	return r.r.Handle(method, path, g) // PATCH: router.Router has no Patch
 }
 
-func guard(h router.HandlerFunc, path string, log func(...any)) router.HandlerFunc {
+func guard(method string, h router.HandlerFunc, path string, log func(...any)) router.HandlerFunc {
 	return func(c router.Context) {
-		ct := c.GetHeader(contentTypeName)
-		if len(ct) < len(contentTypeJSON) || ct[:len(contentTypeJSON)] != contentTypeJSON {
-			c.WriteStatus(statusUnsupportedMediaType)
-			c.Write([]byte(msgNeedJSON))
-			return
+		c.SetHeader(headerCacheControl, cacheNoStore)
+		if hasBody(method) {
+			ct := c.GetHeader(contentTypeName)
+			if len(ct) < len(contentTypeJSON) || ct[:len(contentTypeJSON)] != contentTypeJSON {
+				c.WriteStatus(statusUnsupportedMediaType)
+				c.Write([]byte(msgNeedJSON))
+				return
+			}
 		}
 		h(c)
 		if d := router.InternalError(c); d != "" && log != nil {
@@ -131,28 +169,24 @@ func guard(h router.HandlerFunc, path string, log func(...any)) router.HandlerFu
 	}
 }
 
-// Mount registers every operation of every module as POST <prefix>/<ModelName>/<op> on r, with
+// Mount registers every operation of every module as <METHOD> <prefix>/<module>/<entity> on r, with
 // the access, arguments and description the module declared on the returned Route.
 // Public actions come from the app (`crud.Public`), never from a module.
 // It returns an error, and mounts nothing, when a module has an empty ModelName(), when prefix
 // does not start with "/" or ends with "/", or when two operations resolve to the same path.
 // log is an optional logger called when an operation returns a 500 internal error.
-func Mount(r router.Router, prefix string, log func(...any), public []crud.Public, modules ...crud.Module) error {
+func Mount(r router.Router, prefix string, log func(...any), public []crud.Public, pub events.Publisher, modules ...crud.Module) error {
 	if _, err := Routes(prefix, public, modules...); err != nil {
 		return err
 	}
-
-	act := &activeRegistry{
-		r:      r,
-		prefix: prefix,
-		log:    log,
-	}
+	act := &activeRegistry{r: r, prefix: prefix, log: log}
 	for _, m := range modules {
-		act.module = m.ModelName()
-		if err := crud.Mount(act, public, m); err != nil {
+		if err := crud.Mount(act, public, pub, m); err != nil {
 			return err
 		}
+		if act.err != nil {
+			return act.err
+		}
 	}
-
 	return nil
 }

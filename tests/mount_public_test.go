@@ -5,9 +5,8 @@ import (
 
 	"webtyp.com/crud"
 	"webtyp.com/model"
+	"webtyp.com/router/mock"
 	"webtyp.com/rpc"
-	"webtyp.com/server/httpd"
-	"net/http"
 )
 
 type publicRec struct {
@@ -36,11 +35,25 @@ func (s *publicRecList) DecodeFields(_ model.FieldReader) {}
 type publicTestMod struct{}
 
 func (publicTestMod) ModelName() string { return "pubmod" }
+func (publicTestMod) Definition() model.ModuleDefinition {
+	return defOf("pubmod", model.Definition{
+		Name:  "rec",
+		Allow: model.Create | model.Read,
+		Rules: model.Rules{
+			Create: model.HaveNoBusinessRule,
+			Read:   model.HaveNoBusinessRule,
+		},
+	})
+}
 func (publicTestMod) MountOperations(reg crud.Registry) {
-	reg.Table(crud.Table{
+	reg.AddStoredEntity(crud.StoredEntity{
 		Model:   &publicRec{},
 		NewList: func() model.ModelSlice { return &publicRecList{} },
 		Store:   fakeStore{},
+		Rules: model.Rules{
+			Create: model.HaveNoBusinessRule,
+			Read:   model.HaveNoBusinessRule,
+		},
 	})
 }
 
@@ -52,24 +65,24 @@ func TestRoutes_PublicCreate(t *testing.T) {
 
 	var foundRead, foundCreate bool
 	for _, r := range routes {
-		if r.Path == "/api/pubmod/rec_c" {
+		if r.Path == "/api/pubmod/rec" && r.Method == "POST" {
 			foundCreate = true
 			if r.Access != model.AccessPublic {
-				t.Errorf("expected rec_c to have AccessPublic, got %v", r.Access)
+				t.Errorf("expected rec POST to have AccessPublic, got %v", r.Access)
 			}
 		}
-		if r.Path == "/api/pubmod/rec_r" {
+		if r.Path == "/api/pubmod/rec" && r.Method == "GET" {
 			foundRead = true
 			if r.Access == model.AccessPublic {
-				t.Errorf("expected rec_r to NOT have AccessPublic")
+				t.Errorf("expected rec GET to NOT have AccessPublic")
 			}
 		}
 	}
 	if !foundCreate {
-		t.Errorf("rec_c route not found")
+		t.Errorf("rec POST route not found")
 	}
 	if !foundRead {
-		t.Errorf("rec_r route not found")
+		t.Errorf("rec GET route not found")
 	}
 }
 
@@ -81,24 +94,24 @@ func TestRoutes_PublicReadStillWorks(t *testing.T) {
 
 	var foundRead, foundCreate bool
 	for _, r := range routes {
-		if r.Path == "/api/pubmod/rec_r" {
+		if r.Path == "/api/pubmod/rec" && r.Method == "GET" {
 			foundRead = true
 			if r.Access != model.AccessPublic {
-				t.Errorf("expected rec_r to have AccessPublic, got %v", r.Access)
+				t.Errorf("expected rec GET to have AccessPublic, got %v", r.Access)
 			}
 		}
-		if r.Path == "/api/pubmod/rec_c" {
+		if r.Path == "/api/pubmod/rec" && r.Method == "POST" {
 			foundCreate = true
 			if r.Access == model.AccessPublic {
-				t.Errorf("expected rec_c to NOT have AccessPublic")
+				t.Errorf("expected rec POST to NOT have AccessPublic")
 			}
 		}
 	}
 	if !foundRead {
-		t.Errorf("rec_r route not found")
+		t.Errorf("rec GET route not found")
 	}
 	if !foundCreate {
-		t.Errorf("rec_c route not found")
+		t.Errorf("rec POST route not found")
 	}
 }
 
@@ -109,12 +122,12 @@ func TestRoutes_NoPublicByDefault(t *testing.T) {
 	}
 
 	for _, r := range routes {
-		if r.Path == "/api/pubmod/rec_r" {
+		if r.Path == "/api/pubmod/rec" && r.Method == "GET" {
 			if r.Access == model.AccessPublic {
-				t.Errorf("rec_r should not be public by default")
+				t.Errorf("rec GET should not be public by default")
 			}
 			if r.Resource != "rec" || r.Action != model.Read {
-				t.Errorf("expected rec_r to have Resource=rec, Action=Read; got %v %v", r.Resource, r.Action)
+				t.Errorf("expected rec to have Resource=rec, Action=Read; got %v %v", r.Resource, r.Action)
 			}
 		}
 	}
@@ -123,13 +136,20 @@ func TestRoutes_NoPublicByDefault(t *testing.T) {
 type errWiringMod struct{}
 
 func (errWiringMod) ModelName() string { return "errmod" }
+func (errWiringMod) Definition() model.ModuleDefinition {
+	return defOf("errmod", model.Definition{
+		Name:  "errrec",
+		Allow: model.Create,
+		Rules: model.Rules{Create: model.HaveNoBusinessRule},
+	})
+}
 func (errWiringMod) MountOperations(reg crud.Registry) {
-	reg.Table(crud.Table{})
+	reg.AddStoredEntity(crud.StoredEntity{})
 }
 
 func TestMount_CrudWiringErrorStopsMount(t *testing.T) {
-	r := httpd.NewRouter(http.NewServeMux())
-	err := rpc.Mount(r, "/api", nil, nil, errWiringMod{})
+	r := &mock.Router{}
+	err := rpc.Mount(r, "/api", nil, nil, nil, errWiringMod{})
 	if err != crud.ErrNilFunction {
 		t.Fatalf("expected crud.ErrNilFunction, got %v", err)
 	}
