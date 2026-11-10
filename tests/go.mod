@@ -8,7 +8,7 @@ require (
 	webtyp.com/crud v0.0.8
 	webtyp.com/model v0.2.19
 	webtyp.com/router v0.4.21
-	webtyp.com/rpc v0.2.21
+	webtyp.com/rpc v0.2.22
 	webtyp.com/storage v0.2.0
 )
 
