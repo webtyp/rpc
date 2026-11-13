@@ -6,7 +6,7 @@ require (
 	webtyp.com/crud v0.0.8
 	webtyp.com/events v0.1.8
 	webtyp.com/fetch v0.1.30
-	webtyp.com/fmt v1.0.0
+	webtyp.com/fmt v1.0.1
 	webtyp.com/json v0.5.40
 	webtyp.com/model v0.2.21
 	webtyp.com/router v0.4.21
