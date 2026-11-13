@@ -19,7 +19,7 @@ require (
 	webtyp.com/events v0.1.8 // indirect
 	webtyp.com/fetch v0.1.30 // indirect
 	webtyp.com/filepath v0.1.0 // indirect
-	webtyp.com/fmt v1.0.0 // indirect
+	webtyp.com/fmt v1.0.1 // indirect
 	webtyp.com/json v0.5.40 // indirect
 	webtyp.com/time v0.6.4 // indirect
 )
